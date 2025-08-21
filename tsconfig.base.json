@@ -9,6 +9,9 @@
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "@pong-pong/shared": ["./packages/shared/src/index.ts"]
+    }
   }
 }
