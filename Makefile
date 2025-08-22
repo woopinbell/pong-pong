@@ -1,4 +1,4 @@
-.PHONY: install typecheck build
+.PHONY: install typecheck build test
 
 install:
 	pnpm install
@@ -8,3 +8,6 @@ typecheck:
 
 build:
 	pnpm -r build
+
+test:
+	pnpm -r test
