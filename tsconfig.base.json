@@ -11,7 +11,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "@pong-pong/shared": ["./packages/shared/src/index.ts"]
+      "@pong-pong/shared": ["./packages/shared/src/index.ts"],
+      "@pong-pong/db": ["./packages/db/src/index.ts"]
     }
   }
 }
