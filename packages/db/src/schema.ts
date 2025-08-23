@@ -29,6 +29,7 @@ export interface Database {
 }
 
 export type UserRow = Selectable<UserTable>;
+export type MemoryUserRow = Omit<UserRow, "created_at" | "banned_at">;
 export type UserProjectionRow = Pick<
   UserRow,
   | "id"
