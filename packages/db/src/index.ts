@@ -20,6 +20,10 @@ export interface AppRepository {
   upsertDevUser(input: DevLoginInput): Promise<SessionUser>;
   createSession(userId: string): Promise<string>;
   getSessionUser(token: string | undefined): Promise<SessionUser | null>;
+  getUserById(id: string): Promise<PublicUser | null>;
+  getUserByHandle(handle: string): Promise<PublicUser | null>;
+  updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser>;
+  listOnlineUsers(): Promise<PublicUser[]>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -99,6 +103,34 @@ class PostgresRepository implements AppRepository {
     return user ? toSessionUser(user, true) : null;
   }
 
+  async getUserById(id: string): Promise<PublicUser | null> {
+    const result = await sql<UserRow>`select * from users where id = ${id} limit 1`.execute(this.db);
+    return result.rows[0] ? toPublicUser(result.rows[0]) : null;
+  }
+
+  async getUserByHandle(handle: string): Promise<PublicUser | null> {
+    const result = await sql<UserRow>`select * from users where handle = ${normalizeHandle(handle)} limit 1`.execute(this.db);
+    return result.rows[0] ? toPublicUser(result.rows[0]) : null;
+  }
+
+  async updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser> {
+    const current = await sql<UserRow>`select * from users where id = ${userId} limit 1`.execute(this.db);
+    const user = firstRow(current);
+    const result = await sql<UserRow>`
+      update users
+      set display_name = ${input.displayName ?? user.display_name},
+          avatar_key = ${input.avatarKey ?? user.avatar_key}
+      where id = ${userId}
+      returning *
+    `.execute(this.db);
+    return toSessionUser(firstRow(result), true);
+  }
+
+  async listOnlineUsers(): Promise<PublicUser[]> {
+    const result = await sql<UserRow>`select * from users where status = 'active' order by rating desc limit 12`.execute(this.db);
+    return result.rows.map((row) => toPublicUser(row, true));
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
@@ -148,6 +180,28 @@ class MemoryRepository implements AppRepository {
     const userId = token ? this.sessions.get(token) : undefined;
     const user = userId ? this.users.get(userId) : undefined;
     return user ? toSessionUser(user, true) : null;
+  }
+
+  async getUserById(id: string): Promise<PublicUser | null> {
+    const user = this.users.get(id);
+    return user ? toPublicUser(user, true) : null;
+  }
+
+  async getUserByHandle(handle: string): Promise<PublicUser | null> {
+    const user = [...this.users.values()].find((item) => item.handle === normalizeHandle(handle));
+    return user ? toPublicUser(user, true) : null;
+  }
+
+  async updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser> {
+    const user = this.users.get(userId);
+    if (!user) throw new Error("user not found");
+    user.display_name = input.displayName ?? user.display_name;
+    user.avatar_key = input.avatarKey ?? user.avatar_key;
+    return toSessionUser(user, true);
+  }
+
+  async listOnlineUsers(): Promise<PublicUser[]> {
+    return [...this.users.values()].sort((a, b) => b.rating - a.rating).map((user) => toPublicUser(user, true));
   }
 
 }
