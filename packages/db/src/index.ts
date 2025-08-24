@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { PublicUser, SessionUser } from "@pong-pong/shared";
+import type { LeaderboardEntry, PublicUser, SessionUser } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
 import { toPublicUser, toSessionUser } from "./rowMappers";
 import type { Database, MemoryUserRow, UserRow } from "./schema";
@@ -24,6 +24,7 @@ export interface AppRepository {
   getUserByHandle(handle: string): Promise<PublicUser | null>;
   updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser>;
   listOnlineUsers(): Promise<PublicUser[]>;
+  listLeaderboard(): Promise<LeaderboardEntry[]>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -131,6 +132,15 @@ class PostgresRepository implements AppRepository {
     return result.rows.map((row) => toPublicUser(row, true));
   }
 
+  async listLeaderboard(): Promise<LeaderboardEntry[]> {
+    const result = await sql<UserRow>`select * from users order by rating desc, wins desc limit 20`.execute(this.db);
+    return result.rows.map((row, index) => ({
+      rank: index + 1,
+      user: toPublicUser(row, false),
+      winRate: percentage(row.wins, row.losses)
+    }));
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
@@ -204,6 +214,16 @@ class MemoryRepository implements AppRepository {
     return [...this.users.values()].sort((a, b) => b.rating - a.rating).map((user) => toPublicUser(user, true));
   }
 
+  async listLeaderboard(): Promise<LeaderboardEntry[]> {
+    return [...this.users.values()]
+      .sort((a, b) => b.rating - a.rating || b.wins - a.wins)
+      .map((user, index) => ({
+        rank: index + 1,
+        user: toPublicUser(user, false),
+        winRate: percentage(user.wins, user.losses)
+      }));
+  }
+
 }
 
 function firstRow<T>(result: { rows: T[] }): T {
@@ -219,4 +239,10 @@ function normalizeHandle(value: string): string {
 function avatarFor(handle: string): string {
   const avatars = ["blue", "green", "amber", "violet", "rose"];
   return avatars[Math.abs([...handle].reduce((sum, char) => sum + char.charCodeAt(0), 0)) % avatars.length];
+}
+
+function percentage(wins: number, losses: number): number {
+  const total = Number(wins) + Number(losses);
+  if (total === 0) return 0;
+  return Math.round((Number(wins) / total) * 1000) / 10;
 }
