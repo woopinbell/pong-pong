@@ -18,6 +18,8 @@ export interface AppRepository {
   close(): Promise<void>;
   ensureSeedData(): Promise<void>;
   upsertDevUser(input: DevLoginInput): Promise<SessionUser>;
+  createSession(userId: string): Promise<string>;
+  getSessionUser(token: string | undefined): Promise<SessionUser | null>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -75,10 +77,33 @@ class PostgresRepository implements AppRepository {
     return toSessionUser(firstRow(result));
   }
 
+  async createSession(userId: string): Promise<string> {
+    const token = randomUUID();
+    await sql`
+      insert into sessions (token, user_id, expires_at)
+      values (${token}, ${userId}, now() + interval '14 days')
+    `.execute(this.db);
+    return token;
+  }
+
+  async getSessionUser(token: string | undefined): Promise<SessionUser | null> {
+    if (!token) return null;
+    const result = await sql<UserRow>`
+      select u.*
+      from sessions s
+      join users u on u.id = s.user_id
+      where s.token = ${token} and s.expires_at > now()
+      limit 1
+    `.execute(this.db);
+    const user = result.rows[0];
+    return user ? toSessionUser(user, true) : null;
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
   private readonly users = new Map<string, MemoryUserRow>();
+  private readonly sessions = new Map<string, string>();
 
   async close(): Promise<void> {}
 
@@ -111,6 +136,18 @@ class MemoryRepository implements AppRepository {
     user.display_name = input.displayName || user.display_name;
     this.users.set(user.id, user);
     return toSessionUser(user, true);
+  }
+
+  async createSession(userId: string): Promise<string> {
+    const token = randomUUID();
+    this.sessions.set(token, userId);
+    return token;
+  }
+
+  async getSessionUser(token: string | undefined): Promise<SessionUser | null> {
+    const userId = token ? this.sessions.get(token) : undefined;
+    const user = userId ? this.users.get(userId) : undefined;
+    return user ? toSessionUser(user, true) : null;
   }
 
 }
