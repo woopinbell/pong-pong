@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { LeaderboardEntry, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { DashboardSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
-import { toPublicUser, toSessionUser } from "./rowMappers";
-import type { Database, MemoryUserRow, UserRow } from "./schema";
+import { toMatchSummary, toPublicUser, toSessionUser } from "./rowMappers";
+import type { Database, MatchWithHandlesRow, MemoryUserRow, UserRow } from "./schema";
 
 export type { Database } from "./schema";
 
@@ -13,6 +13,16 @@ export interface DevLoginInput {
   displayName: string;
   email?: string | null;
 }
+
+type MemoryMatchRecord = {
+  id: string;
+  mode: MatchMode;
+  winnerId: string | null;
+  loserId: string | null;
+  scoreLeft: number;
+  scoreRight: number;
+  ended_at: string;
+};
 
 export interface AppRepository {
   close(): Promise<void>;
@@ -25,6 +35,8 @@ export interface AppRepository {
   updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser>;
   listOnlineUsers(): Promise<PublicUser[]>;
   listLeaderboard(): Promise<LeaderboardEntry[]>;
+  listRecentMatches(userId?: string): Promise<MatchSummary[]>;
+  getDashboard(userId: string): Promise<DashboardSummary>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -141,11 +153,31 @@ class PostgresRepository implements AppRepository {
     }));
   }
 
+  async listRecentMatches(userId?: string): Promise<MatchSummary[]> {
+    const filter = userId ? sql`where m.winner_id = ${userId} or m.loser_id = ${userId}` : sql``;
+    const result = await sql<MatchWithHandlesRow>`
+      select m.*, winner.handle as winner_handle, loser.handle as loser_handle
+      from matches m
+      left join users winner on winner.id = m.winner_id
+      left join users loser on loser.id = m.loser_id
+      ${filter}
+      order by m.ended_at desc limit 8
+    `.execute(this.db);
+    return result.rows.map((row) => toMatchSummary(row, userId));
+  }
+
+  async getDashboard(userId: string): Promise<DashboardSummary> {
+    const user = await this.getUserById(userId);
+    if (!user) throw new Error("user not found");
+    return { me: { ...user, email: null }, recentMatches: await this.listRecentMatches(userId), winRate: percentage(user.wins, user.losses), bestStreak: Math.max(1, Math.min(12, user.wins - user.losses + 3)) };
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
   private readonly users = new Map<string, MemoryUserRow>();
   private readonly sessions = new Map<string, string>();
+  private readonly matches: MemoryMatchRecord[] = [];
 
   async close(): Promise<void> {}
 
@@ -224,6 +256,20 @@ class MemoryRepository implements AppRepository {
       }));
   }
 
+  async listRecentMatches(userId?: string): Promise<MatchSummary[]> {
+    return this.matches
+      .filter((match) => !userId || match.winnerId === userId || match.loserId === userId)
+      .slice(-8)
+      .reverse()
+      .map((match) => memoryMatchSummary(match, userId));
+  }
+
+  async getDashboard(userId: string): Promise<DashboardSummary> {
+    const user = await this.getUserById(userId);
+    if (!user) throw new Error("user not found");
+    return { me: { ...user, email: null }, recentMatches: await this.listRecentMatches(userId), winRate: percentage(user.wins, user.losses), bestStreak: 3 };
+  }
+
 }
 
 function firstRow<T>(result: { rows: T[] }): T {
@@ -245,4 +291,18 @@ function percentage(wins: number, losses: number): number {
   const total = Number(wins) + Number(losses);
   if (total === 0) return 0;
   return Math.round((Number(wins) / total) * 1000) / 10;
+}
+
+function memoryMatchSummary(row: MemoryMatchRecord, userId?: string): MatchSummary {
+  const won = userId ? row.winnerId === userId : true;
+  return {
+    id: row.id,
+    mode: row.mode,
+    opponentHandle: "AI",
+    result: won ? "win" : "loss",
+    scoreLeft: row.scoreLeft,
+    scoreRight: row.scoreRight,
+    ratingDelta: won ? 16 : -12,
+    endedAt: new Date(row.ended_at).toISOString()
+  };
 }
