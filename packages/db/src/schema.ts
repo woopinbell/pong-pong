@@ -23,13 +23,32 @@ export interface SessionTable {
   created_at: Generated<Date>;
 }
 
+export interface MatchTable {
+  id: Generated<string>;
+  mode: import("@pong-pong/shared").MatchMode;
+  winner_id: string | null;
+  loser_id: string | null;
+  score_left: number;
+  score_right: number;
+  rating_delta: Generated<number>;
+  started_at: Generated<Date>;
+  ended_at: Generated<Date>;
+}
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
+  matches: MatchTable;
 }
 
 export type UserRow = Selectable<UserTable>;
 export type MemoryUserRow = Omit<UserRow, "created_at" | "banned_at">;
+export type MatchRow = Selectable<MatchTable>;
+
+export interface MatchWithHandlesRow extends MatchRow {
+  winner_handle: string | null;
+  loser_handle: string | null;
+}
 export type UserProjectionRow = Pick<
   UserRow,
   | "id"
