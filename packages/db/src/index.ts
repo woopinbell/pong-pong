@@ -14,13 +14,16 @@ export interface DevLoginInput {
   email?: string | null;
 }
 
-type MemoryMatchRecord = {
-  id: string;
+export interface CreateMatchInput {
   mode: MatchMode;
   winnerId: string | null;
   loserId: string | null;
   scoreLeft: number;
   scoreRight: number;
+}
+
+type MemoryMatchRecord = CreateMatchInput & {
+  id: string;
   ended_at: string;
 };
 
@@ -40,6 +43,7 @@ export interface AppRepository {
   listFriends(userId: string): Promise<FriendSummary[]>;
   requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary>;
   acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary>;
+  createMatch(input: CreateMatchInput): Promise<string>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -202,6 +206,16 @@ class PostgresRepository implements AppRepository {
     return found;
   }
 
+  async createMatch(input: CreateMatchInput): Promise<string> {
+    const result = await sql<{ id: string }>`
+      insert into matches (mode, winner_id, loser_id, score_left, score_right, rating_delta)
+      values (${input.mode}, ${input.winnerId}, ${input.loserId}, ${input.scoreLeft}, ${input.scoreRight}, 16) returning id
+    `.execute(this.db);
+    if (input.winnerId) await sql`update users set wins = wins + 1, rating = rating + 16 where id = ${input.winnerId}`.execute(this.db);
+    if (input.loserId) await sql`update users set losses = losses + 1, rating = greatest(800, rating - 12) where id = ${input.loserId}`.execute(this.db);
+    return firstRow(result).id;
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
@@ -316,6 +330,16 @@ class MemoryRepository implements AppRepository {
     if (!friend) throw new Error("friendship not found");
     friend.status = "accepted";
     return friend;
+  }
+
+  async createMatch(input: CreateMatchInput): Promise<string> {
+    const id = randomUUID();
+    this.matches.push({ ...input, id, ended_at: new Date().toISOString() });
+    const winner = input.winnerId ? this.users.get(input.winnerId) : undefined;
+    if (winner) { winner.wins += 1; winner.rating += 16; }
+    const loser = input.loserId ? this.users.get(input.loserId) : undefined;
+    if (loser) { loser.losses += 1; loser.rating -= 12; }
+    return id;
   }
 
 }
