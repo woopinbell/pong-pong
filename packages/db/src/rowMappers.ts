@@ -1,5 +1,5 @@
-import type { MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
-import type { MatchWithHandlesRow, UserProjectionRow } from "./schema";
+import type { FriendSummary, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { FriendshipWithUserRow, MatchWithHandlesRow, UserProjectionRow } from "./schema";
 
 export function toPublicUser(row: UserProjectionRow, online = false): PublicUser {
   return {
@@ -32,4 +32,8 @@ export function toMatchSummary(row: MatchWithHandlesRow, userId?: string): Match
     ratingDelta: won ? Number(row.rating_delta) : -12,
     endedAt: row.ended_at.toISOString()
   };
+}
+
+export function toFriendSummary(row: FriendshipWithUserRow): FriendSummary {
+  return { id: row.friendship_id, status: row.friendship_status, user: toPublicUser(row, true) };
 }

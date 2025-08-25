@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { DashboardSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
-import { toMatchSummary, toPublicUser, toSessionUser } from "./rowMappers";
-import type { Database, MatchWithHandlesRow, MemoryUserRow, UserRow } from "./schema";
+import { toFriendSummary, toMatchSummary, toPublicUser, toSessionUser } from "./rowMappers";
+import type { Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, UserRow } from "./schema";
 
 export type { Database } from "./schema";
 
@@ -37,6 +37,9 @@ export interface AppRepository {
   listLeaderboard(): Promise<LeaderboardEntry[]>;
   listRecentMatches(userId?: string): Promise<MatchSummary[]>;
   getDashboard(userId: string): Promise<DashboardSummary>;
+  listFriends(userId: string): Promise<FriendSummary[]>;
+  requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary>;
+  acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -172,12 +175,40 @@ class PostgresRepository implements AppRepository {
     return { me: { ...user, email: null }, recentMatches: await this.listRecentMatches(userId), winRate: percentage(user.wins, user.losses), bestStreak: Math.max(1, Math.min(12, user.wins - user.losses + 3)) };
   }
 
+  async listFriends(userId: string): Promise<FriendSummary[]> {
+    const result = await sql<FriendshipWithUserRow>`
+      select f.id as friendship_id, f.status as friendship_status, u.*
+      from friendships f join users u on u.id = case when f.requester_id = ${userId} then f.addressee_id else f.requester_id end
+      where f.requester_id = ${userId} or f.addressee_id = ${userId}
+      order by f.updated_at desc
+    `.execute(this.db);
+    return result.rows.map(toFriendSummary);
+  }
+
+  async requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary> {
+    const addressee = await this.getUserByHandle(addresseeHandle);
+    if (!addressee) throw new Error("friend not found");
+    const result = await sql<{ id: string; status: FriendSummary["status"] }>`
+      insert into friendships (requester_id, addressee_id, status) values (${requesterId}, ${addressee.id}, 'pending')
+      on conflict (requester_id, addressee_id) do update set updated_at = now() returning id, status
+    `.execute(this.db);
+    return { id: firstRow(result).id, status: firstRow(result).status, user: addressee };
+  }
+
+  async acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary> {
+    await sql`update friendships set status = 'accepted', updated_at = now() where id = ${friendshipId} and addressee_id = ${userId}`.execute(this.db);
+    const found = (await this.listFriends(userId)).find((friend) => friend.id === friendshipId);
+    if (!found) throw new Error("friendship not found");
+    return found;
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
   private readonly users = new Map<string, MemoryUserRow>();
   private readonly sessions = new Map<string, string>();
   private readonly matches: MemoryMatchRecord[] = [];
+  private readonly friendships: FriendSummary[] = [];
 
   async close(): Promise<void> {}
 
@@ -268,6 +299,23 @@ class MemoryRepository implements AppRepository {
     const user = await this.getUserById(userId);
     if (!user) throw new Error("user not found");
     return { me: { ...user, email: null }, recentMatches: await this.listRecentMatches(userId), winRate: percentage(user.wins, user.losses), bestStreak: 3 };
+  }
+
+  async listFriends(): Promise<FriendSummary[]> { return this.friendships; }
+
+  async requestFriend(_requesterId: string, addresseeHandle: string): Promise<FriendSummary> {
+    const user = await this.getUserByHandle(addresseeHandle);
+    if (!user) throw new Error("friend not found");
+    const friend = { id: randomUUID(), user, status: "pending" as const };
+    this.friendships.push(friend);
+    return friend;
+  }
+
+  async acceptFriend(_userId: string, friendshipId: string): Promise<FriendSummary> {
+    const friend = this.friendships.find((item) => item.id === friendshipId);
+    if (!friend) throw new Error("friendship not found");
+    friend.status = "accepted";
+    return friend;
   }
 
 }

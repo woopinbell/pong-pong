@@ -35,10 +35,20 @@ export interface MatchTable {
   ended_at: Generated<Date>;
 }
 
+export interface FriendshipTable {
+  id: Generated<string>;
+  requester_id: string;
+  addressee_id: string;
+  status: import("@pong-pong/shared").FriendshipStatus;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
   matches: MatchTable;
+  friendships: FriendshipTable;
 }
 
 export type UserRow = Selectable<UserTable>;
@@ -48,6 +58,11 @@ export type MatchRow = Selectable<MatchTable>;
 export interface MatchWithHandlesRow extends MatchRow {
   winner_handle: string | null;
   loser_handle: string | null;
+}
+
+export interface FriendshipWithUserRow extends UserRow {
+  friendship_id: string;
+  friendship_status: import("@pong-pong/shared").FriendshipStatus;
 }
 export type UserProjectionRow = Pick<
   UserRow,
