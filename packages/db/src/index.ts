@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
-import { toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser } from "./rowMappers";
-import type { ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, UserRow } from "./schema";
+import { toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentSummary } from "./rowMappers";
+import type { ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
 
 export type { Database } from "./schema";
 
@@ -46,6 +46,9 @@ export interface AppRepository {
   createMatch(input: CreateMatchInput): Promise<string>;
   listLobbyChat(): Promise<ChatMessage[]>;
   createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage>;
+  listTournaments(): Promise<TournamentSummary[]>;
+  createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary>;
+  joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -235,6 +238,31 @@ class PostgresRepository implements AppRepository {
     return { id: row.id, scope: row.scope, roomId: row.room_id, sender: user, body: row.body, createdAt: new Date(row.created_at).toISOString() };
   }
 
+  async listTournaments(): Promise<TournamentSummary[]> {
+    const result = await sql<TournamentWithCreatorRow>`select t.*, u.id as creator_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status as user_status, u.rating, u.wins, u.losses from tournaments t join users u on u.id = t.created_by order by t.created_at desc limit 10`.execute(this.db);
+    const summaries: TournamentSummary[] = [];
+    for (const row of result.rows) summaries.push(await this.tournamentFromRow(row));
+    return summaries;
+  }
+
+  async createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary> {
+    const result = await sql<TournamentRow>`insert into tournaments (name, created_by, capacity) values (${input.name}, ${input.createdBy}, 4) returning *`.execute(this.db);
+    await this.joinTournament(firstRow(result).id, input.createdBy);
+    const tournaments = await this.listTournaments();
+    return tournaments.find((item) => item.id === firstRow(result).id) ?? tournaments[0];
+  }
+
+  async joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary> {
+    const count = await sql<{ count: string }>`select count(*)::text from tournament_entries where tournament_id = ${tournamentId}`.execute(this.db);
+    await sql`insert into tournament_entries (tournament_id, user_id, seed) values (${tournamentId}, ${userId}, ${Number(firstRow(count).count) + 1}) on conflict (tournament_id, user_id) do nothing`.execute(this.db);
+    return (await this.listTournaments()).find((item) => item.id === tournamentId)!;
+  }
+
+  private async tournamentFromRow(row: TournamentWithCreatorRow): Promise<TournamentSummary> {
+    const entries = await sql<UserRow>`select u.* from tournament_entries e join users u on u.id = e.user_id where e.tournament_id = ${row.id} order by e.seed asc`.execute(this.db);
+    return toTournamentSummary(row, entries.rows.map((entry) => toPublicUser(entry, true)));
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
@@ -243,6 +271,7 @@ class MemoryRepository implements AppRepository {
   private readonly matches: MemoryMatchRecord[] = [];
   private readonly friendships: FriendSummary[] = [];
   private readonly chats: ChatMessage[] = [];
+  private readonly tournaments: TournamentSummary[] = [];
 
   async close(): Promise<void> {}
 
@@ -370,6 +399,26 @@ class MemoryRepository implements AppRepository {
     const message = { id: randomUUID(), scope: input.scope, roomId: input.roomId ?? null, sender, body: input.body, createdAt: new Date().toISOString() };
     this.chats.push(message);
     return message;
+  }
+
+  async listTournaments(): Promise<TournamentSummary[]> { return this.tournaments; }
+
+  async createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary> {
+    const creator = await this.getUserById(input.createdBy);
+    if (!creator) throw new Error("creator not found");
+    const tournament = { id: randomUUID(), name: input.name, status: "open" as const, createdBy: creator, playerCount: 1, capacity: 4, winner: null, entries: [creator] };
+    this.tournaments.unshift(tournament);
+    return tournament;
+  }
+
+  async joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary> {
+    const tournament = this.tournaments.find((item) => item.id === tournamentId);
+    const user = await this.getUserById(userId);
+    if (!tournament || !user) throw new Error("tournament not found");
+    if (!tournament.entries.some((entry) => entry.id === user.id)) tournament.entries.push(user);
+    tournament.playerCount = tournament.entries.length;
+    tournament.status = tournament.playerCount >= tournament.capacity ? "running" : "open";
+    return tournament;
   }
 
 }
