@@ -1,5 +1,5 @@
-import type { FriendSummary, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
-import type { FriendshipWithUserRow, MatchWithHandlesRow, UserProjectionRow } from "./schema";
+import type { ChatMessage, FriendSummary, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { ChatMessageWithSenderRow, FriendshipWithUserRow, MatchWithHandlesRow, UserProjectionRow } from "./schema";
 
 export function toPublicUser(row: UserProjectionRow, online = false): PublicUser {
   return {
@@ -36,4 +36,26 @@ export function toMatchSummary(row: MatchWithHandlesRow, userId?: string): Match
 
 export function toFriendSummary(row: FriendshipWithUserRow): FriendSummary {
   return { id: row.friendship_id, status: row.friendship_status, user: toPublicUser(row, true) };
+}
+
+export function toChatMessage(row: ChatMessageWithSenderRow): ChatMessage {
+  return {
+    id: row.id,
+    scope: row.scope,
+    roomId: row.room_id,
+    sender: toPublicUser({
+      id: row.user_id,
+      email: row.email,
+      handle: row.handle,
+      display_name: row.display_name,
+      avatar_key: row.avatar_key,
+      role: row.role,
+      status: row.status,
+      rating: row.rating,
+      wins: row.wins,
+      losses: row.losses
+    }),
+    body: row.body,
+    createdAt: row.created_at.toISOString()
+  };
 }

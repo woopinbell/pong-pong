@@ -44,11 +44,21 @@ export interface FriendshipTable {
   updated_at: Generated<Date>;
 }
 
+export interface ChatMessageTable {
+  id: Generated<string>;
+  scope: "lobby" | "match";
+  room_id: string | null;
+  sender_id: string;
+  body: string;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
   matches: MatchTable;
   friendships: FriendshipTable;
+  chat_messages: ChatMessageTable;
 }
 
 export type UserRow = Selectable<UserTable>;
@@ -63,6 +73,20 @@ export interface MatchWithHandlesRow extends MatchRow {
 export interface FriendshipWithUserRow extends UserRow {
   friendship_id: string;
   friendship_status: import("@pong-pong/shared").FriendshipStatus;
+}
+
+export type ChatMessageRow = Selectable<ChatMessageTable>;
+export interface ChatMessageWithSenderRow extends ChatMessageRow {
+  user_id: string;
+  email: string | null;
+  handle: string;
+  display_name: string;
+  avatar_key: string;
+  role: import("@pong-pong/shared").UserRole;
+  status: import("@pong-pong/shared").UserStatus;
+  rating: number;
+  wins: number;
+  losses: number;
 }
 export type UserProjectionRow = Pick<
   UserRow,

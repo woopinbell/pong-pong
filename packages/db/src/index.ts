@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
-import { toFriendSummary, toMatchSummary, toPublicUser, toSessionUser } from "./rowMappers";
-import type { Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, UserRow } from "./schema";
+import { toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser } from "./rowMappers";
+import type { ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, UserRow } from "./schema";
 
 export type { Database } from "./schema";
 
@@ -44,6 +44,8 @@ export interface AppRepository {
   requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary>;
   acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary>;
   createMatch(input: CreateMatchInput): Promise<string>;
+  listLobbyChat(): Promise<ChatMessage[]>;
+  createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -216,6 +218,23 @@ class PostgresRepository implements AppRepository {
     return firstRow(result).id;
   }
 
+  async listLobbyChat(): Promise<ChatMessage[]> {
+    const result = await sql<ChatMessageWithSenderRow>`
+      select c.*, u.id as user_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status, u.rating, u.wins, u.losses
+      from chat_messages c join users u on u.id = c.sender_id where c.scope = 'lobby'
+      order by c.created_at desc limit 20
+    `.execute(this.db);
+    return result.rows.reverse().map(toChatMessage);
+  }
+
+  async createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage> {
+    const result = await sql<ChatMessageRow>`insert into chat_messages (scope, room_id, sender_id, body) values (${input.scope}, ${input.roomId ?? null}, ${input.senderId}, ${input.body}) returning *`.execute(this.db);
+    const user = await this.getUserById(input.senderId);
+    if (!user) throw new Error("chat sender not found");
+    const row = firstRow(result);
+    return { id: row.id, scope: row.scope, roomId: row.room_id, sender: user, body: row.body, createdAt: new Date(row.created_at).toISOString() };
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
@@ -223,6 +242,7 @@ class MemoryRepository implements AppRepository {
   private readonly sessions = new Map<string, string>();
   private readonly matches: MemoryMatchRecord[] = [];
   private readonly friendships: FriendSummary[] = [];
+  private readonly chats: ChatMessage[] = [];
 
   async close(): Promise<void> {}
 
@@ -340,6 +360,16 @@ class MemoryRepository implements AppRepository {
     const loser = input.loserId ? this.users.get(input.loserId) : undefined;
     if (loser) { loser.losses += 1; loser.rating -= 12; }
     return id;
+  }
+
+  async listLobbyChat(): Promise<ChatMessage[]> { return this.chats.filter((chat) => chat.scope === "lobby").slice(-20); }
+
+  async createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage> {
+    const sender = await this.getUserById(input.senderId);
+    if (!sender) throw new Error("chat sender not found");
+    const message = { id: randomUUID(), scope: input.scope, roomId: input.roomId ?? null, sender, body: input.body, createdAt: new Date().toISOString() };
+    this.chats.push(message);
+    return message;
   }
 
 }
