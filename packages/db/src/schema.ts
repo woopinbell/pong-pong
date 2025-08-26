@@ -53,12 +53,32 @@ export interface ChatMessageTable {
   created_at: Generated<Date>;
 }
 
+export interface TournamentTable {
+  id: Generated<string>;
+  name: string;
+  status: Generated<import("@pong-pong/shared").TournamentStatus>;
+  created_by: string;
+  winner_id: string | null;
+  capacity: Generated<number>;
+  created_at: Generated<Date>;
+}
+
+export interface TournamentEntryTable {
+  id: Generated<string>;
+  tournament_id: string;
+  user_id: string;
+  seed: number;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
   matches: MatchTable;
   friendships: FriendshipTable;
   chat_messages: ChatMessageTable;
+  tournaments: TournamentTable;
+  tournament_entries: TournamentEntryTable;
 }
 
 export type UserRow = Selectable<UserTable>;
@@ -84,6 +104,20 @@ export interface ChatMessageWithSenderRow extends ChatMessageRow {
   avatar_key: string;
   role: import("@pong-pong/shared").UserRole;
   status: import("@pong-pong/shared").UserStatus;
+  rating: number;
+  wins: number;
+  losses: number;
+}
+
+export type TournamentRow = Selectable<TournamentTable>;
+export interface TournamentWithCreatorRow extends TournamentRow {
+  creator_id: string;
+  email: string | null;
+  handle: string;
+  display_name: string;
+  avatar_key: string;
+  role: import("@pong-pong/shared").UserRole;
+  user_status: import("@pong-pong/shared").UserStatus;
   rating: number;
   wins: number;
   losses: number;
