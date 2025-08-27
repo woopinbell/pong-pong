@@ -71,6 +71,15 @@ export interface TournamentEntryTable {
   created_at: Generated<Date>;
 }
 
+export interface AdminActionTable {
+  id: Generated<string>;
+  actor_id: string | null;
+  target_user_id: string | null;
+  action: "ban" | "unban";
+  reason: string;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
@@ -79,6 +88,7 @@ export interface Database {
   chat_messages: ChatMessageTable;
   tournaments: TournamentTable;
   tournament_entries: TournamentEntryTable;
+  admin_actions: AdminActionTable;
 }
 
 export type UserRow = Selectable<UserTable>;

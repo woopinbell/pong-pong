@@ -49,6 +49,8 @@ export interface AppRepository {
   listTournaments(): Promise<TournamentSummary[]>;
   createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary>;
   joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary>;
+  listAdminUsers(): Promise<PublicUser[]>;
+  setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser>;
 }
 
 export function createPostgresRepository(databaseUrl: string): AppRepository {
@@ -263,6 +265,17 @@ class PostgresRepository implements AppRepository {
     return toTournamentSummary(row, entries.rows.map((entry) => toPublicUser(entry, true)));
   }
 
+  async listAdminUsers(): Promise<PublicUser[]> {
+    const result = await sql<UserRow>`select * from users order by created_at desc limit 50`.execute(this.db);
+    return result.rows.map((row) => toPublicUser(row, true));
+  }
+
+  async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
+    const result = await sql<UserRow>`update users set status = ${banned ? "banned" : "active"}, banned_at = ${banned ? sql`now()` : null} where id = ${targetUserId} returning *`.execute(this.db);
+    await sql`insert into admin_actions (actor_id, target_user_id, action, reason) values (${actorId}, ${targetUserId}, ${banned ? "ban" : "unban"}, ${reason})`.execute(this.db);
+    return toPublicUser(firstRow(result));
+  }
+
 }
 
 class MemoryRepository implements AppRepository {
@@ -419,6 +432,15 @@ class MemoryRepository implements AppRepository {
     tournament.playerCount = tournament.entries.length;
     tournament.status = tournament.playerCount >= tournament.capacity ? "running" : "open";
     return tournament;
+  }
+
+  async listAdminUsers(): Promise<PublicUser[]> { return this.listOnlineUsers(); }
+
+  async setUserBan(_actorId: string, targetUserId: string, banned: boolean): Promise<PublicUser> {
+    const user = this.users.get(targetUserId);
+    if (!user) throw new Error("user not found");
+    user.status = banned ? "banned" : "active";
+    return toPublicUser(user, true);
   }
 
 }
