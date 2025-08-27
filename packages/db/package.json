@@ -8,7 +8,11 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "migrate": "tsx src/cli.ts migrate",
+    "seed": "tsx src/cli.ts seed",
+    "memory-smoke": "tsx src/cli.ts memory-smoke",
+    "test": "vitest run"
   },
   "dependencies": {
     "@pong-pong/shared": "workspace:*",
