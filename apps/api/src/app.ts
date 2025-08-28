@@ -52,6 +52,13 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     return { user };
   });
 
+  app.get("/users/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const user = await repo.getUserById(id);
+    if (!user) return reply.code(404).send({ message: "not_found" });
+    return { user };
+  });
+
   app.get("/lobby", async (request) => {
     const user = await currentUser(repo, request);
     return {
@@ -63,6 +70,59 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   });
 
   app.get("/leaderboard", async () => ({ entries: await repo.listLeaderboard() }));
+
+  app.get("/dashboard", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    return await repo.getDashboard(user.id);
+  });
+
+  app.get("/profile/:handle", async (request, reply) => {
+    const { handle } = request.params as { handle: string };
+    const user = await repo.getUserByHandle(handle);
+    if (!user) return reply.code(404).send({ message: "프로필을 찾을 수 없습니다." });
+    return { user, recentMatches: await repo.listRecentMatches(user.id) };
+  });
+
+  app.get("/profile/me", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    return { profile: user };
+  });
+
+  app.patch("/profile/me", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    const body = request.body as { displayName?: string; avatarKey?: string };
+    return { profile: await repo.updateProfile(user.id, body) };
+  });
+
+  app.get("/friends", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    return { friends: await repo.listFriends(user.id) };
+  });
+
+  app.post("/friends/request", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    const body = request.body as { handle?: string };
+    return { friend: await repo.requestFriend(user.id, body.handle ?? "") };
+  });
+
+  app.post("/friends", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    const body = request.body as { handle?: string };
+    return { friend: await repo.requestFriend(user.id, body.handle ?? "") };
+  });
+
+  app.post("/friends/:id/accept", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    const { id } = request.params as { id: string };
+    return { friend: await repo.acceptFriend(user.id, id) };
+  });
 
   return app;
 }
