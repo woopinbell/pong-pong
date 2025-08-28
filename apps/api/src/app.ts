@@ -124,6 +124,47 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     return { friend: await repo.acceptFriend(user.id, id) };
   });
 
+  app.get("/tournaments", async () => ({ tournaments: await repo.listTournaments() }));
+
+  app.post("/tournaments", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    const body = request.body as { name?: string };
+    return { tournament: await repo.createTournament({ name: body.name ?? "퐁퐁 주간 컵", createdBy: user.id }) };
+  });
+
+  app.post("/tournaments/:id/join", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    const { id } = request.params as { id: string };
+    return { tournament: await repo.joinTournament(id, user.id) };
+  });
+
+  app.get("/admin/users", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
+    return { users: await repo.listAdminUsers() };
+  });
+
+  app.post("/admin/users/:id/ban", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
+    const { id } = request.params as { id: string };
+    const body = request.body as { banned?: boolean; reason?: string };
+    return { user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review") };
+  });
+
+  app.patch("/admin/users/:id/status", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
+    const { id } = request.params as { id: string };
+    const body = request.body as { status?: "active" | "banned"; reason?: string };
+    return { user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review") };
+  });
+
   return app;
 }
 
