@@ -43,11 +43,24 @@ export class GameHub {
     this.broadcastPresence();
   }
 
-  private receive(client: Client, payload: string): void {
+  private async receive(client: Client, payload: string): Promise<void> {
     try {
       const event = parseClientEvent(payload);
       if (event.type === "queue.join") this.joinQueue(client, event.mode);
       if (event.type === "queue.leave") this.leaveQueue(client);
+      if (event.type === "chat.send") {
+        const message = await this.repo.createChatMessage({
+          scope: event.scope,
+          roomId: event.roomId ?? null,
+          senderId: client.user.id,
+          body: event.body
+        });
+        if (event.scope === "match" && event.roomId) {
+          this.broadcastRoom(event.roomId, { type: "chat.message", message });
+        } else {
+          this.broadcastAll({ type: "chat.message", message });
+        }
+      }
     } catch (error) {
       this.send(client, { type: "error", message: error instanceof Error ? error.message : "메시지를 처리하지 못했습니다." });
     }
