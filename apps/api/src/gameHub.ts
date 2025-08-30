@@ -7,6 +7,7 @@ import {
   GAME_WIDTH,
   PADDLE_HEIGHT,
   encodeServerEvent,
+  parseClientEvent,
   type GameSnapshot,
   type PlayerSide,
   type ServerEvent,
@@ -29,6 +30,7 @@ type Room = {
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
+  private readonly queue: Client[] = [];
   private readonly rooms = new Map<string, Room>();
 
   constructor(private readonly repo: AppRepository) {}
@@ -36,11 +38,23 @@ export class GameHub {
   connect(socket: WebSocket, _request: IncomingMessage, user: SessionUser): void {
     const client: Client = { id: randomUUID(), socket, user, roomId: null };
     this.clients.set(client.id, client);
+    socket.on("message", (payload) => this.receive(client, payload.toString()));
     socket.on("close", () => this.disconnect(client));
     this.broadcastPresence();
   }
 
+  private receive(client: Client, payload: string): void {
+    try {
+      const event = parseClientEvent(payload);
+      if (event.type === "queue.join") this.joinQueue(client, event.mode);
+      if (event.type === "queue.leave") this.leaveQueue(client);
+    } catch (error) {
+      this.send(client, { type: "error", message: error instanceof Error ? error.message : "메시지를 처리하지 못했습니다." });
+    }
+  }
+
   private disconnect(client: Client): void {
+    this.leaveQueue(client);
     this.clients.delete(client.id);
     if (client.roomId) {
       const room = this.rooms.get(client.roomId);
@@ -52,6 +66,26 @@ export class GameHub {
       }
     }
     this.broadcastPresence();
+  }
+
+  private joinQueue(client: Client, mode: "queue" | "ai"): void {
+    this.leaveQueue(client);
+    if (mode === "ai") {
+      this.createRoom(client, null, true);
+      return;
+    }
+    const opponent = this.queue.shift();
+    if (!opponent) {
+      this.queue.push(client);
+      this.broadcastPresence();
+      return;
+    }
+    this.createRoom(opponent, client, false);
+  }
+
+  private leaveQueue(client: Client): void {
+    const index = this.queue.findIndex((queued) => queued.id === client.id);
+    if (index >= 0) this.queue.splice(index, 1);
   }
 
   private createRoom(left: Client, right: Client | null, ai: boolean): void {
