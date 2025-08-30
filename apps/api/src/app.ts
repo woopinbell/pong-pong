@@ -1,8 +1,11 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import websocket from "@fastify/websocket";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import type { AppRepository } from "@pong-pong/db";
 import type { SessionUser } from "@pong-pong/shared";
+import type { WebSocket } from "ws";
+import { GameHub } from "./gameHub";
 
 export interface BuildAppOptions {
   repo: AppRepository;
@@ -11,11 +14,26 @@ export interface BuildAppOptions {
 
 export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+  const hub = new GameHub(repo);
   app.register(cors, {
     origin: [webOrigin, "http://localhost:3000", "http://localhost:8080"],
     credentials: true
   });
   app.register(cookie);
+  app.register(async (realtime) => {
+    await realtime.register(websocket);
+    realtime.get("/ws", { websocket: true }, (socket, request) => {
+      currentUser(repo, request)
+        .then((user) => {
+          if (!user) {
+            socket.close(1008, "unauthorized");
+            return;
+          }
+          hub.connect(socket as WebSocket, request.raw, user);
+        })
+        .catch(() => socket.close(1011, "authentication failed"));
+    });
+  });
   app.get("/health", async () => ({ ok: true, service: "pong-pong-api" }));
 
   app.post("/auth/dev-login", async (request, reply) => {
