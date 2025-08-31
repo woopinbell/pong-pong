@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import type { AppRepository } from "@pong-pong/db";
 import {
+  BALL_RADIUS,
   GAME_HEIGHT,
   GAME_WIDTH,
   PADDLE_HEIGHT,
@@ -117,7 +118,10 @@ export class GameHub {
           left: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 },
           right: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 }
         },
-        ball: { position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 }, velocity: { x: 7, y: 4 } },
+        ball: {
+          position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
+          velocity: { x: 7, y: 4 }
+        },
         players: [
           { id: left.user.id, handle: left.user.handle, displayName: left.user.displayName, side: "left", ready: false, ai: false },
           {
@@ -141,8 +145,46 @@ export class GameHub {
     this.broadcastPresence();
   }
 
+  private async tick(room: Room): Promise<void> {
+    const state = room.snapshot;
+    if (state.phase !== "playing") return;
+    state.tick += 1;
+    state.serverTime = new Date().toISOString();
+
+    const speed = 13;
+    state.paddles.left.y = clamp(state.paddles.left.y + state.paddles.left.dy * speed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
+    if (room.ai) {
+      const center = state.paddles.right.y + PADDLE_HEIGHT / 2;
+      state.paddles.right.dy = state.ball.position.y > center + 14 ? 1 : state.ball.position.y < center - 14 ? -1 : 0;
+    }
+    state.paddles.right.y = clamp(state.paddles.right.y + state.paddles.right.dy * speed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
+
+    state.ball.position.x += state.ball.velocity.x;
+    state.ball.position.y += state.ball.velocity.y;
+    if (state.ball.position.y < BALL_RADIUS || state.ball.position.y > GAME_HEIGHT - BALL_RADIUS) {
+      state.ball.velocity.y *= -1;
+    }
+    collidePaddle(state, "left", 32);
+    collidePaddle(state, "right", GAME_WIDTH - 32);
+
+    if (state.ball.position.x < 0) {
+      state.rightScore += 1;
+      resetBall(state, -1);
+    }
+    if (state.ball.position.x > GAME_WIDTH) {
+      state.leftScore += 1;
+      resetBall(state, 1);
+    }
+    this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: state });
+
+  }
+
   private broadcastPresence(): void {
-    this.broadcastAll({ type: "presence.changed", online: this.clients.size, playing: this.rooms.size * 2 });
+    this.broadcastAll({
+      type: "presence.changed",
+      online: this.clients.size,
+      playing: this.rooms.size * 2
+    });
   }
 
   private broadcastAll(event: ServerEvent): void {
@@ -158,6 +200,29 @@ export class GameHub {
   }
 
   private send(client: Client, event: ServerEvent): void {
-    if (client.socket.readyState === WebSocket.OPEN) client.socket.send(encodeServerEvent(event));
+    if (client.socket.readyState === WebSocket.OPEN) {
+      client.socket.send(encodeServerEvent(event));
+    }
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function resetBall(state: GameSnapshot, xDirection: 1 | -1): void {
+  state.ball.position = { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 };
+  state.ball.velocity = { x: 7 * xDirection, y: state.tick % 2 === 0 ? 4 : -4 };
+}
+
+function collidePaddle(state: GameSnapshot, side: PlayerSide, x: number): void {
+  const paddle = state.paddles[side];
+  const ball = state.ball;
+  const withinY = ball.position.y >= paddle.y && ball.position.y <= paddle.y + PADDLE_HEIGHT;
+  const withinX = side === "left" ? ball.position.x - BALL_RADIUS <= x + 18 : ball.position.x + BALL_RADIUS >= x - 18;
+  if (withinX && withinY && Math.sign(ball.velocity.x) === (side === "left" ? -1 : 1)) {
+    ball.velocity.x *= -1.04;
+    const offset = (ball.position.y - (paddle.y + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
+    ball.velocity.y = offset * 7;
   }
 }
