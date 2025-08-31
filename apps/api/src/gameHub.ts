@@ -8,8 +8,10 @@ import {
   GAME_WIDTH,
   PADDLE_HEIGHT,
   TICK_RATE,
+  WINNING_SCORE,
   encodeServerEvent,
   parseClientEvent,
+  type GameFinished,
   type GameSnapshot,
   type PlayerSide,
   type ServerEvent,
@@ -39,7 +41,7 @@ export class GameHub {
 
   constructor(private readonly repo: AppRepository) {}
 
-  connect(socket: WebSocket, _request: IncomingMessage, user: SessionUser): void {
+  connect(socket: WebSocket, request: IncomingMessage, user: SessionUser): void {
     const client: Client = { id: randomUUID(), socket, user, roomId: null };
     this.clients.set(client.id, client);
     socket.on("message", (payload) => this.receive(client, payload.toString()));
@@ -78,10 +80,7 @@ export class GameHub {
     if (client.roomId) {
       const room = this.rooms.get(client.roomId);
       if (room) {
-        for (const participant of Object.values(room.clients)) {
-          if (participant) participant.roomId = null;
-        }
-        this.rooms.delete(room.id);
+        this.finishRoom(room, client === room.clients.left ? "right" : "left").catch(() => undefined);
       }
     }
     this.broadcastPresence();
@@ -208,6 +207,38 @@ export class GameHub {
     }
     this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: state });
 
+    if (state.leftScore >= WINNING_SCORE || state.rightScore >= WINNING_SCORE || state.tick >= TICK_RATE * 45) {
+      await this.finishRoom(room, state.leftScore >= state.rightScore ? "left" : "right");
+    }
+  }
+
+  private async finishRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
+    if (room.timer) clearInterval(room.timer);
+    room.timer = null;
+    room.snapshot.phase = "finished";
+    const winner = winnerSide === "left" ? room.clients.left : room.clients.right;
+    const loser = winnerSide === "left" ? room.clients.right : room.clients.left;
+    const matchId = await this.repo.createMatch({
+      mode: room.ai ? "ai" : "queue",
+      winnerId: winner?.user.id ?? null,
+      loserId: loser?.user.id ?? null,
+      scoreLeft: room.snapshot.leftScore,
+      scoreRight: room.snapshot.rightScore
+    });
+    const result: GameFinished = {
+      roomId: room.id,
+      matchId,
+      winnerSide,
+      leftScore: room.snapshot.leftScore,
+      rightScore: room.snapshot.rightScore,
+      ratingDelta: 16
+    };
+    this.broadcastRoom(room.id, { type: "game.finished", result });
+    for (const client of Object.values(room.clients)) {
+      if (client) client.roomId = null;
+    }
+    this.rooms.delete(room.id);
+    this.broadcastPresence();
   }
 
   private broadcastPresence(): void {
