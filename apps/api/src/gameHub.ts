@@ -7,6 +7,7 @@ import {
   GAME_HEIGHT,
   GAME_WIDTH,
   PADDLE_HEIGHT,
+  TICK_RATE,
   encodeServerEvent,
   parseClientEvent,
   type GameSnapshot,
@@ -26,7 +27,9 @@ type Room = {
   id: string;
   clients: Partial<Record<PlayerSide, Client>>;
   ai: boolean;
+  ready: Partial<Record<PlayerSide, boolean>>;
   snapshot: GameSnapshot;
+  timer: NodeJS.Timeout | null;
 };
 
 export class GameHub {
@@ -49,6 +52,8 @@ export class GameHub {
       const event = parseClientEvent(payload);
       if (event.type === "queue.join") this.joinQueue(client, event.mode);
       if (event.type === "queue.leave") this.leaveQueue(client);
+      if (event.type === "game.ready") this.markReady(client, event.roomId);
+      if (event.type === "game.input") this.applyInput(client, event.roomId, event.direction);
       if (event.type === "chat.send") {
         const message = await this.repo.createChatMessage({
           scope: event.scope,
@@ -108,6 +113,8 @@ export class GameHub {
       id: roomId,
       clients: { left, ...(right ? { right } : {}) },
       ai,
+      ready: {},
+      timer: null,
       snapshot: {
         roomId,
         phase: "waiting",
@@ -143,6 +150,30 @@ export class GameHub {
     if (right) this.send(right, { type: "queue.matched", roomId, side: "right", opponent: left.user.displayName });
     this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
     this.broadcastPresence();
+  }
+
+  private markReady(client: Client, roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    const side = sideFor(room, client);
+    if (!side) return;
+    room.ready[side] = true;
+    for (const player of room.snapshot.players) {
+      if (player.side === side) player.ready = true;
+    }
+    if (room.ai) room.ready.right = true;
+    if (room.ready.left && room.ready.right && !room.timer) {
+      room.snapshot.phase = "playing";
+      room.timer = setInterval(() => this.tick(room).catch(() => undefined), 1000 / TICK_RATE);
+    }
+    this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
+  }
+
+  private applyInput(client: Client, roomId: string, direction: -1 | 0 | 1): void {
+    const room = this.rooms.get(roomId);
+    if (!room || room.snapshot.phase === "finished") return;
+    const side = sideFor(room, client);
+    if (side) room.snapshot.paddles[side].dy = direction;
   }
 
   private async tick(room: Room): Promise<void> {
@@ -204,6 +235,12 @@ export class GameHub {
       client.socket.send(encodeServerEvent(event));
     }
   }
+}
+
+function sideFor(room: Room, client: Client): PlayerSide | null {
+  if (room.clients.left?.id === client.id) return "left";
+  if (room.clients.right?.id === client.id) return "right";
+  return null;
 }
 
 function clamp(value: number, min: number, max: number): number {
