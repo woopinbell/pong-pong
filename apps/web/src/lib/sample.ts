@@ -1,6 +1,11 @@
 import {
+  BALL_RADIUS,
+  GAME_HEIGHT,
+  GAME_WIDTH,
+  PADDLE_HEIGHT,
   type ChatMessage,
   type DashboardSummary,
+  type GameSnapshot,
   type LeaderboardEntry,
   type PublicUser,
   type TournamentSummary
@@ -57,6 +62,29 @@ export const sampleTournaments: TournamentSummary[] = [
   }
 ];
 
+export function sampleSnapshot(): GameSnapshot {
+  return {
+    roomId: "48291",
+    phase: "playing",
+    tick: 0,
+    leftScore: 1,
+    rightScore: 2,
+    paddles: {
+      left: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 },
+      right: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2 + 54, dy: 0 }
+    },
+    ball: {
+      position: { x: GAME_WIDTH / 2 + 120, y: GAME_HEIGHT / 2 - 40 },
+      velocity: { x: 7, y: 4 }
+    },
+    players: [
+      { id: "left", handle: "pongmaster42", displayName: "퐁마스터", side: "left", ready: true, ai: false },
+      { id: "right", handle: "practice", displayName: "연습 상대", side: "right", ready: true, ai: true }
+    ],
+    serverTime: new Date().toISOString()
+  };
+}
+
 function user(handle: string, displayName: string, rating: number, wins: number, losses: number, avatarKey: string): PublicUser {
   return {
     id: handle,
@@ -71,3 +99,5 @@ function user(handle: string, displayName: string, rating: number, wins: number,
     online: true
   };
 }
+
+export { BALL_RADIUS, GAME_HEIGHT, GAME_WIDTH, PADDLE_HEIGHT };
