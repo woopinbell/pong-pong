@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Signal } from "lucide-react";
 import type { GameSnapshot, ServerEvent } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
@@ -16,6 +16,25 @@ export default function PlayPage() {
   const [status, setStatus] = useState("대기 중");
   const socketRef = useRef<WebSocket | null>(null);
   const score = useMemo(() => `${snapshot.leftScore} - ${snapshot.rightScore}`, [snapshot]);
+
+  useEffect(() => {
+    const handleKey = (event: KeyboardEvent) => {
+      const socket = socketRef.current;
+      if (!socket || !roomId) return;
+      if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") socket.send(JSON.stringify({ type: "game.input", roomId, direction: -1 }));
+      if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") socket.send(JSON.stringify({ type: "game.input", roomId, direction: 1 }));
+    };
+    const stop = () => {
+      const socket = socketRef.current;
+      if (socket && roomId) socket.send(JSON.stringify({ type: "game.input", roomId, direction: 0 }));
+    };
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("keyup", stop);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("keyup", stop);
+    };
+  }, [roomId]);
 
   function connect(mode: "queue" | "ai") {
     const token = getToken();
