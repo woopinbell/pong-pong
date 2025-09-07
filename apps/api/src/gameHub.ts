@@ -41,12 +41,15 @@ export class GameHub {
 
   constructor(private readonly repo: AppRepository) {}
 
-  connect(socket: WebSocket, request: IncomingMessage, user: SessionUser): void {
+  connect(socket: WebSocket, request: IncomingMessage, user: SessionUser, pendingPayloads: string[] = []): void {
     const client: Client = { id: randomUUID(), socket, user, roomId: null };
     this.clients.set(client.id, client);
     socket.on("message", (payload) => this.receive(client, payload.toString()));
     socket.on("close", () => this.disconnect(client));
     this.broadcastPresence();
+    for (const payload of pendingPayloads) {
+      this.receive(client, payload).catch(() => undefined);
+    }
   }
 
   private async receive(client: Client, payload: string): Promise<void> {

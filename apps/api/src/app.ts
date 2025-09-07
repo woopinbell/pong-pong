@@ -15,6 +15,7 @@ export interface BuildAppOptions {
 export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
   const hub = new GameHub(repo);
+
   app.register(cors, {
     origin: [webOrigin, "http://localhost:3000", "http://localhost:8080"],
     credentials: true
@@ -23,17 +24,22 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.register(async (realtime) => {
     await realtime.register(websocket);
     realtime.get("/ws", { websocket: true }, (socket, request) => {
+      const pendingPayloads: string[] = [];
+      const bufferPayload = (payload: Buffer) => pendingPayloads.push(payload.toString());
+      socket.on("message", bufferPayload);
       currentUser(repo, request)
         .then((user) => {
           if (!user) {
             socket.close(1008, "unauthorized");
             return;
           }
-          hub.connect(socket as WebSocket, request.raw, user);
+          socket.off("message", bufferPayload);
+          hub.connect(socket as WebSocket, request.raw, user, pendingPayloads);
         })
         .catch(() => socket.close(1011, "authentication failed"));
     });
   });
+
   app.get("/health", async () => ({ ok: true, service: "pong-pong-api" }));
 
   app.post("/auth/dev-login", async (request, reply) => {
@@ -99,7 +105,10 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     const { handle } = request.params as { handle: string };
     const user = await repo.getUserByHandle(handle);
     if (!user) return reply.code(404).send({ message: "프로필을 찾을 수 없습니다." });
-    return { user, recentMatches: await repo.listRecentMatches(user.id) };
+    return {
+      user,
+      recentMatches: await repo.listRecentMatches(user.id)
+    };
   });
 
   app.get("/profile/me", async (request, reply) => {
@@ -112,7 +121,12 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
     const body = request.body as { displayName?: string; avatarKey?: string };
-    return { profile: await repo.updateProfile(user.id, body) };
+    return {
+      profile: await repo.updateProfile(user.id, {
+        displayName: body.displayName,
+        avatarKey: body.avatarKey
+      })
+    };
   });
 
   app.get("/friends", async (request, reply) => {
