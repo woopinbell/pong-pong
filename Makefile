@@ -1,4 +1,4 @@
-.PHONY: install typecheck build test smoke
+.PHONY: install typecheck build test smoke e2e
 
 install:
 	pnpm install
@@ -15,3 +15,6 @@ test:
 smoke:
 	node tests/smoke-api.mjs
 	node tests/smoke-ws.mjs
+
+e2e:
+	pnpm test:e2e
