@@ -91,6 +91,7 @@ export class GameHub {
 
   private joinQueue(client: Client, mode: "queue" | "ai"): void {
     this.leaveQueue(client);
+    this.pruneQueue();
     if (mode === "ai") {
       this.createRoom(client, null, true);
       return;
@@ -107,6 +108,14 @@ export class GameHub {
   private leaveQueue(client: Client): void {
     const index = this.queue.findIndex((queued) => queued.id === client.id);
     if (index >= 0) this.queue.splice(index, 1);
+  }
+
+  private pruneQueue(): void {
+    for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+      if (this.queue[index].socket.readyState !== WebSocket.OPEN) {
+        this.queue.splice(index, 1);
+      }
+    }
   }
 
   private createRoom(left: Client, right: Client | null, ai: boolean): void {
