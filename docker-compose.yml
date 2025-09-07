@@ -18,7 +18,7 @@ services:
   api:
     image: node:23-bookworm-slim
     working_dir: /app
-    command: sh -c "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @pong-pong/api dev"
+    command: sh -c "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @pong-pong/api start"
     environment:
       DATABASE_URL: postgres://pong:pong@db:5432/pong_pong
       SESSION_SECRET: dev-session-secret
@@ -36,13 +36,14 @@ services:
   web:
     image: node:23-bookworm-slim
     working_dir: /app
-    command: sh -c "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @pong-pong/web dev"
+    command: sh -c "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @pong-pong/web build && pnpm --filter @pong-pong/web start"
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api
       NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
     volumes:
       - .:/app
       - web-node-modules:/app/node_modules
+      - web-next:/app/apps/web/.next
     depends_on:
       - api
     ports:
@@ -62,3 +63,4 @@ volumes:
   pong-pong-db:
   api-node-modules:
   web-node-modules:
+  web-next:
