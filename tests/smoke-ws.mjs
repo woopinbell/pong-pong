@@ -8,25 +8,32 @@ const leftSocket = connect(left.token);
 const rightSocket = connect(right.token);
 const events = [];
 
-leftSocket.addEventListener("message", (event) => events.push(JSON.parse(event.data)));
-rightSocket.addEventListener("message", (event) => events.push(JSON.parse(event.data)));
+leftSocket.addEventListener("message", (event) => events.push({ side: "left", event: JSON.parse(event.data) }));
+rightSocket.addEventListener("message", (event) => events.push({ side: "right", event: JSON.parse(event.data) }));
 
-await opened(leftSocket);
-await opened(rightSocket);
-leftSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
-rightSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
+try {
+  await opened(leftSocket);
+  await opened(rightSocket);
+  leftSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
+  rightSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
 
-const matched = await waitFor(() => events.find((event) => event.type === "queue.matched"));
-leftSocket.send(JSON.stringify({ type: "game.ready", roomId: matched.roomId }));
-rightSocket.send(JSON.stringify({ type: "game.ready", roomId: matched.roomId }));
-leftSocket.send(JSON.stringify({ type: "chat.send", scope: "match", roomId: matched.roomId, body: "준비됐습니다." }));
+  const leftMatched = await waitFor(() => events.find((item) => item.side === "left" && item.event.type === "queue.matched"));
+  const rightMatched = await waitFor(() => events.find((item) => item.side === "right" && item.event.type === "queue.matched"));
+  const roomId = leftMatched.event.roomId === rightMatched.event.roomId ? leftMatched.event.roomId : null;
+  if (!roomId) throw new Error("matched sockets joined different rooms");
 
-await waitFor(() => events.find((event) => event.type === "game.snapshot" && event.snapshot.phase === "playing"));
-await waitFor(() => events.find((event) => event.type === "chat.message"));
+  leftSocket.send(JSON.stringify({ type: "game.ready", roomId }));
+  rightSocket.send(JSON.stringify({ type: "game.ready", roomId }));
+  await waitFor(() => events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "playing"));
 
-leftSocket.close();
-rightSocket.close();
-console.log("websocket smoke ok");
+  leftSocket.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body: "준비됐습니다." }));
+  await waitFor(() => events.find((item) => item.event.type === "chat.message"));
+
+  console.log("websocket smoke ok");
+} finally {
+  leftSocket.close();
+  rightSocket.close();
+}
 
 async function login(handle, displayName) {
   const response = await fetch(`${baseUrl}/auth/dev-login`, {
