@@ -1,4 +1,4 @@
-import type { DashboardSummary, LeaderboardEntry, PublicUser, SessionUser, TournamentSummary, ChatMessage } from "@pong-pong/shared";
+import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
 import { sampleChat, sampleDashboard, sampleLeaderboard, sampleTournaments, sampleUsers } from "./sample";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -80,4 +80,23 @@ export async function getTournaments(): Promise<TournamentSummary[]> {
 
 export async function createTournament(name: string): Promise<TournamentSummary> {
   return (await apiFetch<{ tournament: TournamentSummary }>("/tournaments", { method: "POST", body: JSON.stringify({ name }) })).tournament;
+}
+
+export async function joinTournament(id: string): Promise<TournamentSummary> {
+  return (await apiFetch<{ tournament: TournamentSummary }>(`/tournaments/${id}/join`, { method: "POST" })).tournament;
+}
+
+export async function getProfile(handle: string): Promise<{ user: PublicUser; recentMatches: MatchSummary[] }> {
+  return apiFetch(`/profile/${handle}`);
+}
+
+export async function requestFriend(handle: string): Promise<FriendSummary> {
+  return (await apiFetch<{ friend: FriendSummary }>("/friends/request", { method: "POST", body: JSON.stringify({ handle }) })).friend;
+}
+
+export async function setUserStatus(id: string, status: "active" | "banned"): Promise<PublicUser> {
+  return (await apiFetch<{ user: PublicUser }>(`/admin/users/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, reason: "operator review" })
+  })).user;
 }
