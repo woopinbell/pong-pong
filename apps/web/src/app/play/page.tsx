@@ -15,6 +15,7 @@ export default function PlayPage() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const [status, setStatus] = useState("대기 중");
   const [messages, setMessages] = useState<string[]>(["매치 채팅이 준비되었습니다."]);
+  const [chatInput, setChatInput] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
 
   const score = useMemo(() => `${snapshot.leftScore} - ${snapshot.rightScore}`, [snapshot]);
@@ -71,6 +72,14 @@ export default function PlayPage() {
     }
   }
 
+  function sendChat(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = chatInput.trim();
+    if (!socketRef.current || !roomId || !body) return;
+    socketRef.current.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body }));
+    setChatInput("");
+  }
+
   return (
     <AppShell>
       <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
@@ -110,9 +119,9 @@ export default function PlayPage() {
             <div className="card p-5">
               <h2 className="text-lg font-black text-ink">경기 제어</h2>
               <p className="mt-2 text-sm font-semibold text-muted">일시정지는 화면 상태만 멈추고 서버 연결은 유지합니다.</p>
-              <button className="focus-ring mt-4 rounded-lg border border-line px-4 py-2 text-sm font-black text-ink">
+              <button className="mt-4 cursor-not-allowed rounded-lg border border-line bg-slate-50 px-4 py-2 text-sm font-black text-muted" disabled title="추후 경기 제어 설계에서 다룹니다.">
                 <Pause size={16} className="mr-2 inline" />
-                일시정지
+                일시정지 예정
               </button>
             </div>
           </section>
@@ -136,12 +145,17 @@ export default function PlayPage() {
                 </div>
               ))}
             </div>
-            <div className="mt-4 flex gap-2">
-              <input className="focus-ring min-w-0 flex-1 rounded-lg border border-line px-3 py-2 text-sm" placeholder="메시지 입력" />
-              <button className="focus-ring rounded-lg bg-blue-600 px-3 text-white" aria-label="보내기">
+            <form className="mt-4 flex gap-2" onSubmit={sendChat}>
+              <input
+                className="focus-ring min-w-0 flex-1 rounded-lg border border-line px-3 py-2 text-sm"
+                placeholder="메시지 입력"
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+              />
+              <button className="focus-ring rounded-lg bg-blue-600 px-3 text-white disabled:cursor-not-allowed disabled:bg-slate-300" aria-label="보내기" disabled={!roomId || !chatInput.trim()}>
                 <Send size={18} />
               </button>
-            </div>
+            </form>
           </div>
         </aside>
       </div>
