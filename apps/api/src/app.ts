@@ -89,7 +89,8 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
       me: user,
       onlinePlayers: await repo.listOnlineUsers(),
       recentMatches: await repo.listRecentMatches(user?.id),
-      chat: await repo.listLobbyChat()
+      chat: await repo.listLobbyChat(),
+      stats: hub.liveStats()
     };
   });
 

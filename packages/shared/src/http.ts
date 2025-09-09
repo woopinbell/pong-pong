@@ -60,6 +60,22 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export interface LobbyStats {
+  onlinePlayers: number;
+  playingPlayers: number;
+  queuedPlayers: number;
+  activeRooms: number;
+  averageWaitSeconds: number | null;
+}
+
+export interface LobbyResponse {
+  me: SessionUser | null;
+  onlinePlayers: PublicUser[];
+  recentMatches: MatchSummary[];
+  chat: ChatMessage[];
+  stats: LobbyStats;
+}
+
 export interface TournamentSummary {
   id: string;
   name: string;

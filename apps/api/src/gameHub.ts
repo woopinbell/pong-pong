@@ -25,6 +25,11 @@ type Client = {
   roomId: string | null;
 };
 
+type QueueEntry = {
+  client: Client;
+  queuedAt: number;
+};
+
 type Room = {
   id: string;
   clients: Partial<Record<PlayerSide, Client>>;
@@ -36,8 +41,9 @@ type Room = {
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
-  private readonly queue: Client[] = [];
+  private readonly queue: QueueEntry[] = [];
   private readonly rooms = new Map<string, Room>();
+  private readonly waitSamples: number[] = [];
 
   constructor(private readonly repo: AppRepository) {}
 
@@ -98,23 +104,46 @@ export class GameHub {
     }
     const opponent = this.queue.shift();
     if (!opponent) {
-      this.queue.push(client);
+      this.queue.push({ client, queuedAt: Date.now() });
       this.broadcastPresence();
       return;
     }
-    this.createRoom(opponent, client, false);
+    this.recordWaitSample(opponent.queuedAt);
+    this.createRoom(opponent.client, client, false);
   }
 
   private leaveQueue(client: Client): void {
-    const index = this.queue.findIndex((queued) => queued.id === client.id);
+    const index = this.queue.findIndex((queued) => queued.client.id === client.id);
     if (index >= 0) this.queue.splice(index, 1);
   }
 
   private pruneQueue(): void {
     for (let index = this.queue.length - 1; index >= 0; index -= 1) {
-      if (this.queue[index].socket.readyState !== WebSocket.OPEN) {
+      if (this.queue[index].client.socket.readyState !== WebSocket.OPEN) {
         this.queue.splice(index, 1);
       }
+    }
+  }
+
+  liveStats() {
+    const playingPlayers = [...this.rooms.values()].reduce((count, room) => count + Object.values(room.clients).filter(Boolean).length, 0);
+    const averageWaitSeconds = this.waitSamples.length === 0
+      ? null
+      : Math.round(this.waitSamples.reduce((sum, value) => sum + value, 0) / this.waitSamples.length);
+    return {
+      onlinePlayers: this.clients.size,
+      playingPlayers,
+      queuedPlayers: this.queue.length,
+      activeRooms: this.rooms.size,
+      averageWaitSeconds
+    };
+  }
+
+  private recordWaitSample(queuedAt: number): void {
+    const seconds = Math.max(0, Math.round((Date.now() - queuedAt) / 1000));
+    this.waitSamples.push(seconds);
+    if (this.waitSamples.length > 20) {
+      this.waitSamples.shift();
     }
   }
 
