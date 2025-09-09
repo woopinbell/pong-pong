@@ -14,14 +14,17 @@ export function setToken(token: string): void {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  if (token) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...init.headers
-    }
+    headers
   });
   if (!response.ok) {
     throw new Error((await response.text()) || "요청을 처리하지 못했습니다.");
