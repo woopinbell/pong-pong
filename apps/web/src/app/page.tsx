@@ -7,22 +7,41 @@ import { AppShell } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
 import { StatCard } from "@/components/StatCard";
-import { getLobby, getMe } from "@/lib/api";
+import { getLobby, getMe, sendLobbyChat } from "@/lib/api";
 import { sampleChat, sampleUsers } from "@/lib/sample";
 
 export default function HomePage() {
   const [me, setMe] = useState<SessionUser | null>(null);
   const [players, setPlayers] = useState<PublicUser[]>(sampleUsers);
   const [chat, setChat] = useState<ChatMessage[]>(sampleChat);
+  const [chatInput, setChatInput] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     getMe().then(setMe);
-    getLobby().then((lobby) => {
-      setPlayers(lobby.onlinePlayers);
-      setChat(lobby.chat);
-      if (lobby.me) setMe(lobby.me);
-    });
+    getLobby()
+      .then((lobby) => {
+        setPlayers(lobby.onlinePlayers);
+        setChat(lobby.chat);
+        if (lobby.me) setMe(lobby.me);
+        setNotice("");
+      })
+      .catch(() => setNotice("서버 로비 정보를 불러오지 못해 샘플 화면을 표시합니다."));
   }, []);
+
+  async function submitLobbyChat(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = chatInput.trim();
+    if (!body) return;
+    try {
+      const message = await sendLobbyChat(body);
+      setChat((current) => [...current.slice(-19), message]);
+      setChatInput("");
+      setNotice("");
+    } catch {
+      setNotice("로비 채팅 전송에 실패했습니다.");
+    }
+  }
 
   if (!me) {
     return (
@@ -87,6 +106,7 @@ export default function HomePage() {
           <h2 className="flex items-center gap-2 text-lg font-black text-ink">
             <MessageCircle size={20} /> 로비 채팅
           </h2>
+          {notice ? <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{notice}</p> : null}
           <div className="mt-4 grid gap-3">
             {chat.map((message) => (
               <div key={message.id} className="rounded-lg bg-slate-50 p-3">
@@ -95,6 +115,17 @@ export default function HomePage() {
               </div>
             ))}
           </div>
+          <form className="mt-4 flex gap-2" onSubmit={submitLobbyChat}>
+            <input
+              className="focus-ring min-w-0 flex-1 rounded-lg border border-line px-3 py-2 text-sm font-semibold"
+              placeholder="로비 메시지 입력"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+            />
+            <button className="focus-ring rounded-lg bg-blue-600 px-4 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" disabled={!chatInput.trim()}>
+              보내기
+            </button>
+          </form>
         </div>
       </section>
       <section className="mt-5 grid gap-4 md:grid-cols-2">

@@ -1,5 +1,5 @@
-import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
-import { sampleChat, sampleDashboard, sampleLeaderboard, sampleTournaments, sampleUsers } from "./sample";
+import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, LobbyResponse, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
+import { sampleDashboard, sampleLeaderboard, sampleTournaments } from "./sample";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -49,12 +49,12 @@ export async function getMe(): Promise<SessionUser | null> {
   }
 }
 
-export async function getLobby(): Promise<{ me: SessionUser | null; onlinePlayers: PublicUser[]; chat: ChatMessage[] }> {
-  try {
-    return await apiFetch("/lobby");
-  } catch {
-    return { me: null, onlinePlayers: sampleUsers, chat: sampleChat };
-  }
+export async function getLobby(): Promise<LobbyResponse> {
+  return await apiFetch("/lobby");
+}
+
+export async function sendLobbyChat(body: string): Promise<ChatMessage> {
+  return (await apiFetch<{ message: ChatMessage }>("/chat/lobby", { method: "POST", body: JSON.stringify({ body }) })).message;
 }
 
 export async function getDashboard(): Promise<DashboardSummary> {
