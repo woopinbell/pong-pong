@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bot, Clock, MessageCircle, Trophy, Users, Zap } from "lucide-react";
-import type { ChatMessage, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { ChatMessage, LobbyStats, PublicUser, SessionUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
@@ -14,6 +14,7 @@ export default function HomePage() {
   const [me, setMe] = useState<SessionUser | null>(null);
   const [players, setPlayers] = useState<PublicUser[]>(sampleUsers);
   const [chat, setChat] = useState<ChatMessage[]>(sampleChat);
+  const [stats, setStats] = useState<LobbyStats | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -23,6 +24,7 @@ export default function HomePage() {
       .then((lobby) => {
         setPlayers(lobby.onlinePlayers);
         setChat(lobby.chat);
+        setStats(lobby.stats);
         if (lobby.me) setMe(lobby.me);
         setNotice("");
       })
@@ -80,22 +82,22 @@ export default function HomePage() {
         <PongCanvas />
       </section>
       <section className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={Trophy} label="승리" value={String(me.wins)} hint="이번 주 +2" tone="green" />
+        <StatCard icon={Trophy} label="승리" value={String(me.wins)} hint="누적 전적" tone="green" />
         <StatCard icon={Zap} label="점수" value={String(me.rating)} hint="최근 경기 반영" />
-        <StatCard icon={Users} label="온라인" value={String(players.length)} hint="로비 접속 중" tone="green" />
-        <StatCard icon={Clock} label="대기" value="30초" hint="평균 예상 시간" tone="amber" />
+        <StatCard icon={Users} label="온라인" value={stats ? String(stats.onlinePlayers) : "확인 중"} hint={`경기 중 ${stats?.playingPlayers ?? 0}명`} tone="green" />
+        <StatCard icon={Clock} label="대기" value={stats?.averageWaitSeconds == null ? "대기 없음" : `${stats.averageWaitSeconds}초`} hint={`큐 ${stats?.queuedPlayers ?? 0}명 · 방 ${stats?.activeRooms ?? 0}개`} tone="amber" />
       </section>
       <section className="mt-5 grid gap-5 xl:grid-cols-[1fr_1fr]">
         <div className="card p-5">
           <h2 className="flex items-center gap-2 text-lg font-black text-ink">
-            <Users size={20} /> 접속 중인 선수
+            <Users size={20} /> 활성 선수
           </h2>
           <div className="mt-4 divide-y divide-line">
             {players.map((player) => (
               <div key={player.id} className="flex items-center justify-between py-3">
                 <div>
                   <p className="font-black text-ink">{player.displayName}</p>
-              <p className="text-sm font-semibold text-muted">점수 {player.rating}</p>
+                  <p className="text-sm font-semibold text-muted">점수 {player.rating}</p>
                 </div>
                 <div className="text-right text-sm font-black text-green-600">{player.rating}</div>
               </div>
@@ -129,15 +131,17 @@ export default function HomePage() {
         </div>
       </section>
       <section className="mt-5 grid gap-4 md:grid-cols-2">
-        <a className="card block bg-blue-600 p-6 text-white" href="/play">
+        <a className="focus-ring card block border-2 border-blue-600 bg-white p-6 text-ink transition hover:-translate-y-0.5 hover:shadow-xl" href="/play">
           <Users size={28} />
           <h2 className="mt-3 text-xl font-black">매칭 큐 참가</h2>
-          <p className="mt-2 text-sm font-semibold text-blue-50">비슷한 점수의 상대를 찾습니다.</p>
+          <p className="mt-2 text-sm font-semibold text-muted">비슷한 점수의 상대를 찾습니다.</p>
+          <span className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">경기장 열기</span>
         </a>
-        <a className="card block bg-green-600 p-6 text-white" href="/play?mode=ai">
+        <a className="focus-ring card block border-2 border-green-600 bg-white p-6 text-ink transition hover:-translate-y-0.5 hover:shadow-xl" href="/play?mode=ai">
           <Bot size={28} />
           <h2 className="mt-3 text-xl font-black">인공지능 연습</h2>
-          <p className="mt-2 text-sm font-semibold text-green-50">서버 박자 기반 상대와 바로 연습합니다.</p>
+          <p className="mt-2 text-sm font-semibold text-muted">서버 박자 기반 상대와 바로 연습합니다.</p>
+          <span className="mt-4 inline-flex rounded-lg bg-green-600 px-4 py-2 text-sm font-black text-white">연습 시작</span>
         </a>
       </section>
     </AppShell>
