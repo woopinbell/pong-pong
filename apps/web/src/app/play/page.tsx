@@ -17,19 +17,26 @@ export default function PlayPage() {
   const [messages, setMessages] = useState<string[]>(["매치 채팅이 준비되었습니다."]);
   const [chatInput, setChatInput] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
+  const directionRef = useRef<-1 | 0 | 1>(0);
 
   const score = useMemo(() => `${snapshot.leftScore} - ${snapshot.rightScore}`, [snapshot]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      const socket = socketRef.current;
-      if (!socket || !roomId) return;
-      if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") socket.send(JSON.stringify({ type: "game.input", roomId, direction: -1 }));
-      if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") socket.send(JSON.stringify({ type: "game.input", roomId, direction: 1 }));
+      if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") {
+        event.preventDefault();
+        directionRef.current = -1;
+      }
+      if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        directionRef.current = 1;
+      }
     };
-    const stop = () => {
-      const socket = socketRef.current;
-      if (socket && roomId) socket.send(JSON.stringify({ type: "game.input", roomId, direction: 0 }));
+    const stop = (event: KeyboardEvent) => {
+      if (["ArrowUp", "ArrowDown", "w", "W", "s", "S"].includes(event.key)) {
+        event.preventDefault();
+        directionRef.current = 0;
+      }
     };
     window.addEventListener("keydown", handleKey);
     window.addEventListener("keyup", stop);
@@ -37,6 +44,16 @@ export default function PlayPage() {
       window.removeEventListener("keydown", handleKey);
       window.removeEventListener("keyup", stop);
     };
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+    const timer = window.setInterval(() => {
+      const socket = socketRef.current;
+      if (!socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: "game.input", roomId, direction: directionRef.current }));
+    }, 50);
+    return () => window.clearInterval(timer);
   }, [roomId]);
 
   function connect(mode: "queue" | "ai") {
