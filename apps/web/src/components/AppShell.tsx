@@ -65,7 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="h-8 w-px bg-line" />
           <div className="text-right">
             <div className="text-sm font-black text-ink">오늘의 랠리</div>
-            <div className="text-xs font-semibold text-green-600">평균 대기 30초 이하</div>
+            <div className="text-xs font-semibold text-green-600">로비 지표 실시간 반영</div>
           </div>
         </header>
         <div className="mx-auto max-w-[1220px] px-4 py-6 sm:px-6 lg:px-8">{children}</div>
