@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Flame, Target, Trophy, X } from "lucide-react";
-import type { DashboardSummary } from "@pong-pong/shared";
+import type { DashboardSummary, MatchSummary } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { getDashboard } from "@/lib/api";
@@ -10,6 +10,8 @@ import { sampleDashboard } from "@/lib/sample";
 
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<DashboardSummary>(sampleDashboard);
+  const ratingPoints = buildRatingPoints(dashboard.me.rating, dashboard.recentMatches);
+  const chartPoints = toChartPoints(ratingPoints);
 
   useEffect(() => {
     getDashboard().then(setDashboard);
@@ -30,15 +32,17 @@ export default function DashboardPage() {
           <h2 className="text-lg font-black text-ink">점수 흐름</h2>
           <div className="mt-5 h-64 rounded-lg border border-line bg-gradient-to-b from-blue-50 to-white p-5">
             <svg viewBox="0 0 640 220" className="h-full w-full" role="img" aria-label="점수 상승 그래프">
-              <polyline points="0,180 80,164 160,152 240,130 320,124 400,92 480,104 560,70 640,78" fill="none" stroke="#1768f2" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+              <polyline points={chartPoints} fill="none" stroke="#1768f2" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
               <line x1="0" y1="180" x2="640" y2="180" stroke="#d8e1ef" />
               <line x1="0" y1="110" x2="640" y2="110" stroke="#d8e1ef" strokeDasharray="8 8" />
             </svg>
           </div>
+          <p className="mt-3 text-sm font-bold text-muted">현재 점수 {dashboard.me.rating} 기준 최근 경기 변화를 역산해 표시합니다.</p>
         </div>
         <div className="card p-5">
           <h2 className="text-lg font-black text-ink">최근 경기</h2>
           <div className="mt-4 divide-y divide-line">
+            {dashboard.recentMatches.length === 0 ? <p className="py-4 text-sm font-semibold text-muted">아직 저장된 경기가 없습니다.</p> : null}
             {dashboard.recentMatches.map((match) => (
               <div key={match.id} className="grid grid-cols-[80px_1fr_70px] items-center gap-3 py-3 text-sm font-bold">
                 <span className={`rounded-full px-3 py-1 text-center ${match.result === "win" ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"}`}>{match.result === "win" ? "승리" : "패배"}</span>
@@ -53,4 +57,28 @@ export default function DashboardPage() {
       </section>
     </AppShell>
   );
+}
+
+function buildRatingPoints(currentRating: number, recentMatches: MatchSummary[]): number[] {
+  const reversed = [...recentMatches].reverse();
+  let rating = currentRating - reversed.reduce((sum, match) => sum + match.ratingDelta, 0);
+  const points = [rating];
+  for (const match of reversed) {
+    rating += match.ratingDelta;
+    points.push(rating);
+  }
+  return points.length === 1 ? [currentRating - 1, currentRating] : points;
+}
+
+function toChartPoints(points: number[]): string {
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = Math.max(1, max - min);
+  return points
+    .map((point, index) => {
+      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * 640;
+      const y = 190 - ((point - min) / range) * 150;
+      return `${Math.round(x)},${Math.round(y)}`;
+    })
+    .join(" ");
 }
