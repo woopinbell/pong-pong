@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Share2, UserPlus } from "lucide-react";
-import type { PublicUser } from "@pong-pong/shared";
+import type { MatchSummary, PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { sampleUsers } from "@/lib/sample";
@@ -12,6 +12,7 @@ import { getProfile, requestFriend } from "@/lib/api";
 export default function ProfilePage({ params }: { params: Promise<{ handle: string }> }) {
   const [handle, setHandle] = useState("pongmaster42");
   const [user, setUser] = useState<PublicUser>(sampleUsers[0]);
+  const [recentMatches, setRecentMatches] = useState<MatchSummary[]>([]);
   const [message, setMessage] = useState("친구 요청은 로그인 후 보낼 수 있습니다.");
 
   useEffect(() => {
@@ -19,8 +20,12 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
       setHandle(resolved);
       setUser(sampleUsers.find((item) => item.handle === resolved) ?? { ...sampleUsers[0], handle: resolved, displayName: "퐁마스터" });
       getProfile(resolved)
-        .then((profile) => setUser(profile.user))
-        .catch(() => undefined);
+        .then((profile) => {
+          setUser(profile.user);
+          setRecentMatches(profile.recentMatches);
+          setMessage("공개 프로필 정보를 표시합니다.");
+        })
+        .catch(() => setMessage("프로필 정보를 불러오지 못해 샘플 정보를 표시합니다."));
     });
   }, [params]);
 
@@ -64,8 +69,17 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
         <StatCard icon={Target} label="승률" value={`${Math.round((user.wins / Math.max(1, user.wins + user.losses)) * 100)}%`} hint="점수 반영" />
       </section>
       <section className="card mt-5 p-5">
-        <h2 className="text-lg font-black text-ink">플레이 스타일</h2>
-        <p className="mt-3 text-sm font-semibold leading-6 text-muted">긴 랠리에서 안정적으로 버티는 타입입니다. 백핸드 쪽 낮은 공에 강하고 빠른 서브를 상대할 때는 중앙 복귀가 빠릅니다.</p>
+        <h2 className="text-lg font-black text-ink">공개 최근 경기</h2>
+        <div className="mt-4 divide-y divide-line">
+          {recentMatches.length === 0 ? <p className="py-4 text-sm font-semibold text-muted">공개할 최근 경기가 없습니다.</p> : null}
+          {recentMatches.map((match) => (
+            <div key={match.id} className="grid grid-cols-[80px_1fr_70px] items-center gap-3 py-3 text-sm font-bold">
+              <span className={`rounded-full px-3 py-1 text-center ${match.result === "win" ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"}`}>{match.result === "win" ? "승리" : "패배"}</span>
+              <span className="text-muted">{match.opponentHandle}</span>
+              <span className="text-right text-ink">{match.scoreLeft} - {match.scoreRight}</span>
+            </div>
+          ))}
+        </div>
       </section>
     </AppShell>
   );
