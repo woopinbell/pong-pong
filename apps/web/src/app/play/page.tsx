@@ -14,7 +14,7 @@ export default function PlayPage() {
   const [snapshot, setSnapshot] = useState<GameSnapshot>(sampleSnapshot());
   const [roomId, setRoomId] = useState<string | null>(null);
   const [status, setStatus] = useState("대기 중");
-  const [messages, setMessages] = useState<string[]>(["매치 채팅이 준비되었습니다."]);
+  const [messages, setMessages] = useState<string[]>([]);
   const [chatInput, setChatInput] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const directionRef = useRef<-1 | 0 | 1>(0);
@@ -156,11 +156,15 @@ export default function PlayPage() {
               <MessageCircle size={20} /> 매치 채팅
             </h2>
             <div className="mt-4 grid gap-3">
-              {messages.map((message, index) => (
-                <div key={`${message}-${index}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-muted">
-                  {message}
-                </div>
-              ))}
+              {messages.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-line p-3 text-sm font-semibold text-muted">아직 매치 채팅이 없습니다.</div>
+              ) : (
+                messages.map((message, index) => (
+                  <div key={`${message}-${index}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-muted">
+                    {message}
+                  </div>
+                ))
+              )}
             </div>
             <form className="mt-4 flex gap-2" onSubmit={sendChat}>
               <input
