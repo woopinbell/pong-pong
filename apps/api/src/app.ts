@@ -97,7 +97,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.post("/chat/lobby", async (request, reply) => {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
-    const body = request.body as { body?: string };
+    const body = (request.body ?? {}) as { body?: string };
     const messageBody = body.body?.trim() ?? "";
     if (!messageBody) return reply.code(400).send({ message: "메시지를 입력해주세요." });
     if (messageBody.length > 240) return reply.code(400).send({ message: "메시지는 240자 이내로 입력해주세요." });
