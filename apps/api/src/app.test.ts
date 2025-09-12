@@ -37,5 +37,34 @@ describe("api routes", () => {
     expect(leaderboard.statusCode).toBe(200);
     expect(lobby.statusCode).toBe(200);
     expect(leaderboard.json<{ entries: unknown[] }>().entries.length).toBeGreaterThan(0);
+    expect(lobby.json<{ stats: { onlinePlayers: number; queuedPlayers: number; averageWaitSeconds: number | null } }>().stats).toMatchObject({
+      onlinePlayers: 0,
+      queuedPlayers: 0,
+      averageWaitSeconds: null
+    });
+  });
+
+  it("stores lobby chat messages for the current user", async () => {
+    const login = await app.inject({
+      method: "POST",
+      url: "/auth/dev-login",
+      payload: { handle: "chat-api", displayName: "채팅API" }
+    });
+    const token = login.json<{ token: string }>().token;
+
+    const sent = await app.inject({
+      method: "POST",
+      url: "/chat/lobby",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { body: "로비 채팅 저장 확인" }
+    });
+    const lobby = await app.inject({ method: "GET", url: "/lobby", headers: { authorization: `Bearer ${token}` } });
+
+    expect(sent.statusCode).toBe(200);
+    expect(sent.json<{ message: { body: string; sender: { handle: string } } }>().message).toMatchObject({
+      body: "로비 채팅 저장 확인",
+      sender: { handle: "chat-api" }
+    });
+    expect(lobby.json<{ chat: Array<{ body: string }> }>().chat.some((message) => message.body === "로비 채팅 저장 확인")).toBe(true);
   });
 });
