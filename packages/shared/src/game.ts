@@ -7,7 +7,7 @@ export const WINNING_SCORE = 3;
 export const TICK_RATE = 20;
 
 export type PlayerSide = "left" | "right";
-export type GamePhase = "waiting" | "countdown" | "playing" | "finished";
+export type GamePhase = "waiting" | "countdown" | "playing" | "paused" | "finished";
 
 export interface Vec2 {
   x: number;

@@ -9,6 +9,8 @@ export const clientEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("queue.leave") }),
   z.object({ type: z.literal("game.ready"), roomId: z.string() }),
+  z.object({ type: z.literal("game.pause"), roomId: z.string() }),
+  z.object({ type: z.literal("game.resume"), roomId: z.string() }),
   z.object({
     type: z.literal("game.input"),
     roomId: z.string(),
