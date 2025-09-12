@@ -102,14 +102,29 @@ export class GameHub {
       this.createRoom(client, null, true);
       return;
     }
-    const opponent = this.queue.shift();
-    if (!opponent) {
+    const opponentIndex = this.findClosestQueuedOpponent(client);
+    if (opponentIndex < 0) {
       this.queue.push({ client, queuedAt: Date.now() });
       this.broadcastPresence();
       return;
     }
+    const [opponent] = this.queue.splice(opponentIndex, 1);
     this.recordWaitSample(opponent.queuedAt);
     this.createRoom(opponent.client, client, false);
+  }
+
+  private findClosestQueuedOpponent(client: Client): number {
+    let bestIndex = -1;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < this.queue.length; index += 1) {
+      const candidate = this.queue[index];
+      const distance = Math.abs(candidate.client.user.rating - client.user.rating);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    }
+    return bestIndex;
   }
 
   private leaveQueue(client: Client): void {

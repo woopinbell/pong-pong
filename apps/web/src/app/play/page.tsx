@@ -6,12 +6,11 @@ import type { GameSnapshot, ServerEvent } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { PongCanvas } from "@/components/PongCanvas";
 import { getToken } from "@/lib/api";
-import { sampleSnapshot } from "@/lib/sample";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export default function PlayPage() {
-  const [snapshot, setSnapshot] = useState<GameSnapshot>(sampleSnapshot());
+  const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [status, setStatus] = useState("대기 중");
   const [messages, setMessages] = useState<string[]>([]);
@@ -19,7 +18,13 @@ export default function PlayPage() {
   const socketRef = useRef<WebSocket | null>(null);
   const directionRef = useRef<-1 | 0 | 1>(0);
 
-  const score = useMemo(() => `${snapshot.leftScore} - ${snapshot.rightScore}`, [snapshot]);
+  const score = useMemo(() => (snapshot ? `${snapshot.leftScore} - ${snapshot.rightScore}` : "경기 전"), [snapshot]);
+  const phase = snapshot?.phase ?? "waiting";
+  const canReady = Boolean(roomId && phase === "waiting");
+  const canChat = Boolean(roomId && phase !== "finished" && chatInput.trim());
+  const opponentName = snapshot?.players.find((player) => player.side === "right")?.displayName ?? "대기 중";
+
+  useEffect(() => () => closeCurrentSocket(), []);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -47,14 +52,14 @@ export default function PlayPage() {
   }, [roomId]);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || phase !== "playing") return;
     const timer = window.setInterval(() => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) return;
       socket.send(JSON.stringify({ type: "game.input", roomId, direction: directionRef.current }));
     }, 50);
     return () => window.clearInterval(timer);
-  }, [roomId]);
+  }, [roomId, phase]);
 
   function connect(mode: "queue" | "ai") {
     const token = getToken();
@@ -62,6 +67,12 @@ export default function PlayPage() {
       setStatus("로그인 후 이용할 수 있습니다.");
       return;
     }
+    closeCurrentSocket();
+    setRoomId(null);
+    setSnapshot(null);
+    setMessages([]);
+    setChatInput("");
+    directionRef.current = 0;
     const socket = new WebSocket(`${WS_URL}?session=${token}`);
     socketRef.current = socket;
     socket.onopen = () => {
@@ -75,15 +86,26 @@ export default function PlayPage() {
         setStatus(`${message.opponent} 상대와 연결됨`);
       }
       if (message.type === "game.snapshot") setSnapshot(message.snapshot);
-      if (message.type === "game.finished") setStatus(`경기 종료: ${message.result.leftScore} - ${message.result.rightScore}`);
+      if (message.type === "game.finished") {
+        setRoomId(null);
+        directionRef.current = 0;
+        setSnapshot((current) => current ? { ...current, phase: "finished" } : current);
+        setStatus(`경기 종료: ${message.result.leftScore} - ${message.result.rightScore}`);
+      }
       if (message.type === "chat.message") setMessages((current) => [...current.slice(-5), `${message.message.sender.displayName}: ${message.message.body}`]);
       if (message.type === "error") setStatus(message.message);
     };
-    socket.onclose = () => setStatus("연결 종료");
+    socket.onclose = () => {
+      if (socketRef.current !== socket) return;
+      socketRef.current = null;
+      setRoomId(null);
+      directionRef.current = 0;
+      setStatus("연결 종료");
+    };
   }
 
   function ready() {
-    if (socketRef.current && roomId) {
+    if (socketRef.current && canReady && roomId) {
       socketRef.current.send(JSON.stringify({ type: "game.ready", roomId }));
       setStatus("준비 완료");
     }
@@ -95,6 +117,17 @@ export default function PlayPage() {
     if (!socketRef.current || !roomId || !body) return;
     socketRef.current.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body }));
     setChatInput("");
+  }
+
+  function closeCurrentSocket() {
+    const socket = socketRef.current;
+    if (!socket) return;
+    socket.onclose = null;
+    socket.onmessage = null;
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close();
+    }
+    socketRef.current = null;
   }
 
   return (
@@ -128,7 +161,11 @@ export default function PlayPage() {
             <div className="card p-5">
               <h2 className="text-lg font-black text-ink">내 상태</h2>
               <p className="mt-2 text-sm font-semibold text-muted">방이 잡히면 준비 버튼으로 경기를 시작합니다.</p>
-              <button className="focus-ring mt-4 rounded-lg border border-blue-200 px-4 py-2 text-sm font-black text-blue-700" onClick={ready}>
+              <button
+                className="focus-ring mt-4 rounded-lg border border-blue-200 px-4 py-2 text-sm font-black text-blue-700 disabled:cursor-not-allowed disabled:border-line disabled:text-muted"
+                onClick={ready}
+                disabled={!canReady}
+              >
                 <Play size={16} className="mr-2 inline" />
                 준비
               </button>
@@ -148,7 +185,7 @@ export default function PlayPage() {
             <h2 className="flex items-center gap-2 text-lg font-black text-ink">
               <Users size={20} /> 상대 정보
             </h2>
-            <p className="mt-4 text-2xl font-black text-ink">{snapshot.players.find((player) => player.side === "right")?.displayName ?? "대기 중"}</p>
+            <p className="mt-4 text-2xl font-black text-ink">{opponentName}</p>
             <p className="mt-2 text-sm font-semibold text-muted">서버 경기 장면 기준으로 상태가 갱신됩니다.</p>
           </div>
           <div className="card p-5">
@@ -173,7 +210,7 @@ export default function PlayPage() {
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
               />
-              <button className="focus-ring rounded-lg bg-blue-600 px-3 text-white disabled:cursor-not-allowed disabled:bg-slate-300" aria-label="보내기" disabled={!roomId || !chatInput.trim()}>
+              <button className="focus-ring rounded-lg bg-blue-600 px-3 text-white disabled:cursor-not-allowed disabled:bg-slate-300" aria-label="보내기" disabled={!canChat}>
                 <Send size={18} />
               </button>
             </form>

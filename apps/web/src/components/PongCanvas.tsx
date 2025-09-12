@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import { BALL_RADIUS, GAME_HEIGHT, GAME_WIDTH, PADDLE_HEIGHT, type GameSnapshot } from "@pong-pong/shared";
-import { sampleSnapshot } from "@/lib/sample";
 
 type RenderSample = GameSnapshot & {
   receivedAt: number;
@@ -10,11 +9,15 @@ type RenderSample = GameSnapshot & {
 
 const interpolationDelayMs = 80;
 
-export function PongCanvas({ snapshot = sampleSnapshot() }: { snapshot?: GameSnapshot }) {
+export function PongCanvas({ snapshot = null }: { snapshot?: GameSnapshot | null }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const samples = useRef<RenderSample[]>([]);
 
   useEffect(() => {
+    if (!snapshot) {
+      samples.current = [];
+      return;
+    }
     samples.current = [...samples.current, toRenderSample(snapshot)].slice(-8);
   }, [snapshot]);
 
@@ -31,7 +34,7 @@ export function PongCanvas({ snapshot = sampleSnapshot() }: { snapshot?: GameSna
     let animation = 0;
 
     function draw() {
-      const renderSnapshot = selectRenderSnapshot(samples.current, performance.now()) ?? snapshot;
+      const renderSnapshot = selectRenderSnapshot(samples.current, performance.now()) ?? snapshot ?? emptySnapshot();
       context.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       drawSnapshot(context, renderSnapshot);
       animation = requestAnimationFrame(draw);
@@ -95,6 +98,26 @@ function toRenderSample(snapshot: GameSnapshot): RenderSample {
     },
     players: snapshot.players.map((player) => ({ ...player })),
     receivedAt: performance.now()
+  };
+}
+
+function emptySnapshot(): GameSnapshot {
+  return {
+    roomId: "",
+    phase: "waiting",
+    tick: 0,
+    leftScore: 0,
+    rightScore: 0,
+    paddles: {
+      left: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 },
+      right: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 }
+    },
+    ball: {
+      position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
+      velocity: { x: 0, y: 0 }
+    },
+    players: [],
+    serverTime: new Date(0).toISOString()
   };
 }
 
