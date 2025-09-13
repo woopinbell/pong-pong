@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Clock, MessageCircle, Trophy, Users, Zap } from "lucide-react";
-import type { ChatMessage, LobbyStats, PublicUser, SessionUser } from "@pong-pong/shared";
+import type { ChatMessage, LobbyStats, PublicUser, ServerEvent, SessionUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
 import { StatCard } from "@/components/StatCard";
-import { getLobby, getMe, sendLobbyChat } from "@/lib/api";
+import { getLobby, getMe, getToken, sendLobbyChat } from "@/lib/api";
 import { sampleChat, sampleUsers } from "@/lib/sample";
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export default function HomePage() {
   const [me, setMe] = useState<SessionUser | null>(null);
@@ -17,27 +19,61 @@ export default function HomePage() {
   const [stats, setStats] = useState<LobbyStats | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [notice, setNotice] = useState("");
+  const socketRef = useRef<WebSocket | null>(null);
+  const userId = me?.id;
+
+  const loadLobby = useCallback(async () => {
+    const lobby = await getLobby();
+    setPlayers(lobby.onlinePlayers);
+    setChat(lobby.chat);
+    setStats(lobby.stats);
+    if (lobby.me) setMe(lobby.me);
+    setNotice("");
+  }, []);
 
   useEffect(() => {
     getMe().then(setMe);
-    getLobby()
-      .then((lobby) => {
-        setPlayers(lobby.onlinePlayers);
-        setChat(lobby.chat);
-        setStats(lobby.stats);
-        if (lobby.me) setMe(lobby.me);
-        setNotice("");
-      })
-      .catch(() => setNotice("서버 로비 정보를 불러오지 못해 샘플 화면을 표시합니다."));
-  }, []);
+    loadLobby().catch(() => setNotice("서버 로비 정보를 불러오지 못해 샘플 화면을 표시합니다."));
+  }, [loadLobby]);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!userId || !token) return;
+    const socket = new WebSocket(`${WS_URL}?session=${token}`);
+    socketRef.current = socket;
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data) as ServerEvent;
+      if (message.type === "chat.message" && message.message.scope === "lobby") {
+        setChat((current) => [...current.filter((item) => item.id !== message.message.id).slice(-19), message.message]);
+      }
+      if (message.type === "presence.changed") {
+        loadLobby().catch(() => setNotice("로비 지표를 갱신하지 못했습니다."));
+      }
+      if (message.type === "error") setNotice(message.message);
+    };
+    socket.onclose = () => {
+      if (socketRef.current === socket) socketRef.current = null;
+    };
+    return () => {
+      socket.onclose = null;
+      socket.onmessage = null;
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
+      if (socketRef.current === socket) socketRef.current = null;
+    };
+  }, [loadLobby, userId]);
 
   async function submitLobbyChat(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = chatInput.trim();
     if (!body) return;
     try {
-      const message = await sendLobbyChat(body);
-      setChat((current) => [...current.slice(-19), message]);
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "chat.send", scope: "lobby", roomId: null, body }));
+      } else {
+        const message = await sendLobbyChat(body);
+        setChat((current) => [...current.slice(-19), message]);
+      }
       setChatInput("");
       setNotice("");
     } catch {
