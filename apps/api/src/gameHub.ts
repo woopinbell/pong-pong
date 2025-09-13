@@ -64,6 +64,8 @@ export class GameHub {
       if (event.type === "queue.join") this.joinQueue(client, event.mode);
       if (event.type === "queue.leave") this.leaveQueue(client);
       if (event.type === "game.ready") this.markReady(client, event.roomId);
+      if (event.type === "game.pause") this.pauseRoom(client, event.roomId);
+      if (event.type === "game.resume") this.resumeRoom(client, event.roomId);
       if (event.type === "game.input") this.applyInput(client, event.roomId, event.direction);
       if (event.type === "chat.send") {
         const message = await this.repo.createChatMessage({
@@ -226,9 +228,30 @@ export class GameHub {
 
   private applyInput(client: Client, roomId: string, direction: -1 | 0 | 1): void {
     const room = this.rooms.get(roomId);
-    if (!room || room.snapshot.phase === "finished") return;
+    if (!room || room.snapshot.phase !== "playing") return;
     const side = sideFor(room, client);
     if (side) room.snapshot.paddles[side].dy = direction;
+  }
+
+  private pauseRoom(client: Client, roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room || room.snapshot.phase !== "playing" || !sideFor(room, client)) return;
+    if (room.timer) clearInterval(room.timer);
+    room.timer = null;
+    room.snapshot.phase = "paused";
+    room.snapshot.serverTime = new Date().toISOString();
+    this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
+  }
+
+  private resumeRoom(client: Client, roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room || room.snapshot.phase !== "paused" || !sideFor(room, client)) return;
+    room.snapshot.phase = "playing";
+    room.snapshot.serverTime = new Date().toISOString();
+    if (!room.timer) {
+      room.timer = setInterval(() => this.tick(room).catch(() => undefined), 1000 / TICK_RATE);
+    }
+    this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
   }
 
   private async tick(room: Room): Promise<void> {
