@@ -22,6 +22,8 @@ export default function PlayPage() {
   const phase = snapshot?.phase ?? "waiting";
   const canReady = Boolean(roomId && phase === "waiting");
   const canChat = Boolean(roomId && phase !== "finished" && chatInput.trim());
+  const canPause = Boolean(roomId && phase === "playing");
+  const canResume = Boolean(roomId && phase === "paused");
   const opponentName = snapshot?.players.find((player) => player.side === "right")?.displayName ?? "대기 중";
 
   useEffect(() => () => closeCurrentSocket(), []);
@@ -85,7 +87,12 @@ export default function PlayPage() {
         setRoomId(message.roomId);
         setStatus(`${message.opponent} 상대와 연결됨`);
       }
-      if (message.type === "game.snapshot") setSnapshot(message.snapshot);
+      if (message.type === "game.snapshot") {
+        setSnapshot(message.snapshot);
+        if (message.snapshot.phase === "playing") setStatus("경기 진행 중");
+        if (message.snapshot.phase === "paused") setStatus("일시정지 중");
+        if (message.snapshot.phase === "waiting") setStatus("준비 대기 중");
+      }
       if (message.type === "game.finished") {
         setRoomId(null);
         directionRef.current = 0;
@@ -117,6 +124,17 @@ export default function PlayPage() {
     if (!socketRef.current || !roomId || !body) return;
     socketRef.current.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body }));
     setChatInput("");
+  }
+
+  function togglePause() {
+    if (!socketRef.current || !roomId) return;
+    if (canPause) {
+      socketRef.current.send(JSON.stringify({ type: "game.pause", roomId }));
+      return;
+    }
+    if (canResume) {
+      socketRef.current.send(JSON.stringify({ type: "game.resume", roomId }));
+    }
   }
 
   function closeCurrentSocket() {
@@ -172,10 +190,14 @@ export default function PlayPage() {
             </div>
             <div className="card p-5">
               <h2 className="text-lg font-black text-ink">경기 제어</h2>
-              <p className="mt-2 text-sm font-semibold text-muted">일시정지는 화면 상태만 멈추고 서버 연결은 유지합니다.</p>
-              <button className="mt-4 cursor-not-allowed rounded-lg border border-line bg-slate-50 px-4 py-2 text-sm font-black text-muted" disabled title="추후 경기 제어 설계에서 다룹니다.">
+              <p className="mt-2 text-sm font-semibold text-muted">서버 경기 상태를 멈추거나 다시 시작합니다.</p>
+              <button
+                className="focus-ring mt-4 rounded-lg border border-line bg-white px-4 py-2 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
+                onClick={togglePause}
+                disabled={!canPause && !canResume}
+              >
                 <Pause size={16} className="mr-2 inline" />
-                일시정지 예정
+                {canResume ? "다시 시작" : "일시정지"}
               </button>
             </div>
           </section>
