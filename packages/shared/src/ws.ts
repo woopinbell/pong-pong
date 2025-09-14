@@ -8,6 +8,7 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     mode: z.enum(["queue", "ai"]).default("queue")
   }),
   z.object({ type: z.literal("queue.leave") }),
+  z.object({ type: z.literal("tournament.join"), matchId: z.string() }),
   z.object({ type: z.literal("game.ready"), roomId: z.string() }),
   z.object({ type: z.literal("game.pause"), roomId: z.string() }),
   z.object({ type: z.literal("game.resume"), roomId: z.string() }),

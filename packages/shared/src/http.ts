@@ -85,4 +85,20 @@ export interface TournamentSummary {
   capacity: number;
   winner: PublicUser | null;
   entries: PublicUser[];
+  matches: TournamentMatchSummary[];
+}
+
+export interface TournamentMatchSummary {
+  id: string;
+  tournamentId: string;
+  round: "semifinal" | "final";
+  slot: number;
+  status: "pending" | "ready" | "running" | "finished";
+  left: PublicUser | null;
+  right: PublicUser | null;
+  winner: PublicUser | null;
+  scoreLeft: number | null;
+  scoreRight: number | null;
+  roomId: string | null;
+  matchId: string | null;
 }
