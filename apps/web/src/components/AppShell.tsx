@@ -1,21 +1,30 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, Gamepad2, Home, Shield, Trophy, UserRound, Users } from "lucide-react";
-
-const nav = [
-  { href: "/", label: "로비", icon: Home },
-  { href: "/play", label: "경기", icon: Gamepad2 },
-  { href: "/dashboard", label: "대시보드", icon: BarChart3 },
-  { href: "/leaderboard", label: "순위표", icon: Trophy },
-  { href: "/tournaments", label: "토너먼트", icon: Users },
-  { href: "/profile/tester", label: "프로필", icon: UserRound },
-  { href: "/admin", label: "관리", icon: Shield }
-];
+import type { SessionUser } from "@pong-pong/shared";
+import { getMe } from "@/lib/api";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [me, setMe] = useState<SessionUser | null>(null);
+  const profileHref = me ? `/profile/${me.handle}` : "/";
+  const nav = [
+    { href: "/", label: "로비", icon: Home },
+    { href: "/play", label: "경기", icon: Gamepad2 },
+    { href: "/dashboard", label: "대시보드", icon: BarChart3 },
+    { href: "/leaderboard", label: "순위표", icon: Trophy },
+    { href: "/tournaments", label: "토너먼트", icon: Users },
+    { href: profileHref, label: "프로필", icon: UserRound, matchPrefix: "/profile" },
+    { href: "/admin", label: "관리", icon: Shield }
+  ];
+
+  useEffect(() => {
+    getMe().then(setMe).catch(() => setMe(null));
+  }, []);
+
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
       <aside className="border-b border-line bg-white lg:min-h-screen lg:border-b-0 lg:border-r">
@@ -32,7 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <nav className="grid gap-2">
             {nav.map((item) => {
               const Icon = item.icon;
-              const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+              const active = pathname === item.href || Boolean(item.matchPrefix && pathname.startsWith(item.matchPrefix)) || (item.href !== "/" && pathname.startsWith(item.href));
               return (
                 <Link
                   key={item.href}

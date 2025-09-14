@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Share2, UserPlus } from "lucide-react";
+import { Share2, Target, Trophy, UserPlus, X } from "lucide-react";
 import type { MatchSummary, PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
-import { Target, Trophy, X } from "lucide-react";
 import { getProfile, requestFriend } from "@/lib/api";
 
 export default function ProfilePage({ params }: { params: Promise<{ handle: string }> }) {
@@ -40,6 +39,16 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
     }
   }
 
+  async function shareProfile() {
+    try {
+      const url = `${window.location.origin}/profile/${handle}`;
+      await navigator.clipboard.writeText(url);
+      setMessage("프로필 공유 링크를 복사했습니다.");
+    } catch {
+      setMessage("프로필 공유 링크를 복사하지 못했습니다.");
+    }
+  }
+
   return (
     <AppShell>
       {!user ? (
@@ -64,9 +73,9 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
               <UserPlus size={18} className="mr-2 inline" />
               친구 추가
             </button>
-            <button className="cursor-not-allowed rounded-lg border border-line bg-slate-50 px-4 py-3 text-sm font-black text-muted" disabled title="공유 링크 복사는 추후 프로필 배포 기능에서 다룹니다.">
+            <button className="focus-ring rounded-lg border border-line px-4 py-3 text-sm font-black text-ink" onClick={shareProfile}>
               <Share2 size={18} className="mr-2 inline" />
-              공유 예정
+              공유
             </button>
           </div>
         </div>
