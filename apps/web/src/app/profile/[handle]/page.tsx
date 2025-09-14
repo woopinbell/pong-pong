@@ -5,27 +5,29 @@ import { Share2, UserPlus } from "lucide-react";
 import type { MatchSummary, PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
-import { sampleUsers } from "@/lib/sample";
 import { Target, Trophy, X } from "lucide-react";
 import { getProfile, requestFriend } from "@/lib/api";
 
 export default function ProfilePage({ params }: { params: Promise<{ handle: string }> }) {
   const [handle, setHandle] = useState("pongmaster42");
-  const [user, setUser] = useState<PublicUser>(sampleUsers[0]);
+  const [user, setUser] = useState<PublicUser | null>(null);
   const [recentMatches, setRecentMatches] = useState<MatchSummary[]>([]);
-  const [message, setMessage] = useState("친구 요청은 로그인 후 보낼 수 있습니다.");
+  const [message, setMessage] = useState("프로필 정보를 불러오는 중입니다.");
 
   useEffect(() => {
     params.then(({ handle: resolved }) => {
       setHandle(resolved);
-      setUser(sampleUsers.find((item) => item.handle === resolved) ?? { ...sampleUsers[0], handle: resolved, displayName: "퐁마스터" });
       getProfile(resolved)
         .then((profile) => {
           setUser(profile.user);
           setRecentMatches(profile.recentMatches);
           setMessage("공개 프로필 정보를 표시합니다.");
         })
-        .catch(() => setMessage("프로필 정보를 불러오지 못해 샘플 정보를 표시합니다."));
+        .catch(() => {
+          setUser(null);
+          setRecentMatches([]);
+          setMessage("프로필 정보를 불러오지 못했습니다.");
+        });
     });
   }, [params]);
 
@@ -40,6 +42,13 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
 
   return (
     <AppShell>
+      {!user ? (
+        <section className="card p-6">
+          <h1 className="text-3xl font-black text-ink">프로필</h1>
+          <p className="mt-4 text-sm font-bold text-muted">{message}</p>
+        </section>
+      ) : (
+        <>
       <section className="card p-6">
         <div className="flex flex-wrap items-center justify-between gap-5">
           <div className="flex items-center gap-5">
@@ -81,6 +90,8 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
           ))}
         </div>
       </section>
+        </>
+      )}
     </AppShell>
   );
 }

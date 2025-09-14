@@ -5,26 +5,32 @@ import { Plus, Trophy } from "lucide-react";
 import type { TournamentSummary } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { createTournament, getTournaments, joinTournament } from "@/lib/api";
-import { sampleTournaments } from "@/lib/sample";
 
 export default function TournamentsPage() {
-  const [items, setItems] = useState<TournamentSummary[]>(sampleTournaments);
-  const [selectedId, setSelectedId] = useState(sampleTournaments[0]?.id ?? "");
-  const [message, setMessage] = useState("대회를 선택하면 브래킷과 참가 상태를 확인할 수 있습니다.");
+  const [items, setItems] = useState<TournamentSummary[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [message, setMessage] = useState("대회 목록을 불러오는 중입니다.");
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
 
   useEffect(() => {
-    getTournaments().then((tournaments) => {
-      setItems(tournaments);
-      setSelectedId((current) => current || tournaments[0]?.id || "");
-    });
+    getTournaments()
+      .then((tournaments) => {
+        setItems(tournaments);
+        setSelectedId((current) => current || tournaments[0]?.id || "");
+        setMessage(tournaments.length === 0 ? "진행 중인 대회가 없습니다." : "대회를 선택하면 브래킷과 참가 상태를 확인할 수 있습니다.");
+      })
+      .catch(() => setMessage("대회 목록을 불러오지 못했습니다."));
   }, []);
 
   async function create() {
-    const tournament = await createTournament("새로운 퐁퐁 컵");
-    setItems((current) => [tournament, ...current]);
-    setSelectedId(tournament.id);
-    setMessage(`${tournament.name}을 생성했습니다.`);
+    try {
+      const tournament = await createTournament("새로운 퐁퐁 컵");
+      setItems((current) => [tournament, ...current.filter((item) => item.id !== tournament.id)]);
+      setSelectedId(tournament.id);
+      setMessage(`${tournament.name}을 생성했습니다.`);
+    } catch {
+      setMessage("토너먼트 생성에는 로그인이 필요합니다.");
+    }
   }
 
   async function join() {
@@ -56,6 +62,7 @@ export default function TournamentsPage() {
         <div className="card p-5">
           <h2 className="text-lg font-black text-ink">진행 중인 대회</h2>
           <div className="mt-4 grid gap-3">
+            {items.length === 0 ? <p className="rounded-lg border border-dashed border-line p-4 text-sm font-semibold text-muted">표시할 대회가 없습니다.</p> : null}
             {items.map((item) => (
               <button
                 key={item.id}

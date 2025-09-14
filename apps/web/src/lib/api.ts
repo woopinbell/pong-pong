@@ -1,5 +1,4 @@
 import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, LobbyResponse, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
-import { sampleDashboard, sampleLeaderboard, sampleTournaments } from "./sample";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -58,27 +57,15 @@ export async function sendLobbyChat(body: string): Promise<ChatMessage> {
 }
 
 export async function getDashboard(): Promise<DashboardSummary> {
-  try {
-    return await apiFetch("/dashboard");
-  } catch {
-    return sampleDashboard;
-  }
+  return await apiFetch("/dashboard");
 }
 
 export async function getLeaderboard(): Promise<LeaderboardEntry[]> {
-  try {
-    return (await apiFetch<{ entries: LeaderboardEntry[] }>("/leaderboard")).entries;
-  } catch {
-    return sampleLeaderboard;
-  }
+  return (await apiFetch<{ entries: LeaderboardEntry[] }>("/leaderboard")).entries;
 }
 
 export async function getTournaments(): Promise<TournamentSummary[]> {
-  try {
-    return (await apiFetch<{ tournaments: TournamentSummary[] }>("/tournaments")).tournaments;
-  } catch {
-    return sampleTournaments;
-  }
+  return (await apiFetch<{ tournaments: TournamentSummary[] }>("/tournaments")).tournaments;
 }
 
 export async function createTournament(name: string): Promise<TournamentSummary> {

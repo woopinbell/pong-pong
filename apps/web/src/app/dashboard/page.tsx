@@ -6,16 +6,31 @@ import type { DashboardSummary, MatchSummary } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
 import { getDashboard } from "@/lib/api";
-import { sampleDashboard } from "@/lib/sample";
 
 export default function DashboardPage() {
-  const [dashboard, setDashboard] = useState<DashboardSummary>(sampleDashboard);
-  const ratingPoints = buildRatingPoints(dashboard.me.rating, dashboard.recentMatches);
-  const chartPoints = toChartPoints(ratingPoints);
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  const [message, setMessage] = useState("대시보드를 불러오는 중입니다.");
 
   useEffect(() => {
-    getDashboard().then(setDashboard);
+    getDashboard()
+      .then((summary) => {
+        setDashboard(summary);
+        setMessage("");
+      })
+      .catch(() => setMessage("대시보드를 불러오려면 로그인 상태와 서버 연결을 확인해야 합니다."));
   }, []);
+
+  if (!dashboard) {
+    return (
+      <AppShell>
+        <h1 className="text-3xl font-black text-ink">내 대시보드</h1>
+        <p className="mt-4 rounded-lg border border-line bg-white p-4 text-sm font-bold text-muted">{message}</p>
+      </AppShell>
+    );
+  }
+
+  const ratingPoints = buildRatingPoints(dashboard.me.rating, dashboard.recentMatches);
+  const chartPoints = toChartPoints(ratingPoints);
 
   return (
     <AppShell>

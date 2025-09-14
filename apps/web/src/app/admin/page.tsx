@@ -5,10 +5,9 @@ import { Shield } from "lucide-react";
 import type { PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { apiFetch, setUserStatus } from "@/lib/api";
-import { sampleUsers } from "@/lib/sample";
 
 export default function AdminPage() {
-  const [users, setUsers] = useState<PublicUser[]>(sampleUsers);
+  const [users, setUsers] = useState<PublicUser[]>([]);
   const [message, setMessage] = useState("운영자 계정으로 로그인하면 상태 변경이 저장됩니다.");
 
   useEffect(() => {
@@ -17,7 +16,7 @@ export default function AdminPage() {
         setUsers(result.users);
         setMessage("사용자 목록을 불러왔습니다.");
       })
-      .catch(() => setMessage("운영자 권한이 없어서 샘플 목록을 표시합니다."));
+      .catch(() => setMessage("운영자 권한이 필요합니다."));
   }, []);
 
   async function toggleUser(user: PublicUser) {
@@ -47,6 +46,7 @@ export default function AdminPage() {
           <span className="text-right">상태</span>
           <span className="text-right">조치</span>
         </div>
+        {users.length === 0 ? <p className="px-5 py-4 text-sm font-bold text-muted">표시할 사용자 목록이 없습니다.</p> : null}
         {users.map((user) => (
           <div key={user.id} className="grid grid-cols-[1fr_120px_120px_120px] items-center border-b border-line px-5 py-4 last:border-b-0">
             <div>

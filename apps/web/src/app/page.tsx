@@ -8,14 +8,13 @@ import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
 import { StatCard } from "@/components/StatCard";
 import { getLobby, getMe, getToken, sendLobbyChat } from "@/lib/api";
-import { sampleChat, sampleUsers } from "@/lib/sample";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export default function HomePage() {
   const [me, setMe] = useState<SessionUser | null>(null);
-  const [players, setPlayers] = useState<PublicUser[]>(sampleUsers);
-  const [chat, setChat] = useState<ChatMessage[]>(sampleChat);
+  const [players, setPlayers] = useState<PublicUser[]>([]);
+  const [chat, setChat] = useState<ChatMessage[]>([]);
   const [stats, setStats] = useState<LobbyStats | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [notice, setNotice] = useState("");
@@ -33,7 +32,7 @@ export default function HomePage() {
 
   useEffect(() => {
     getMe().then(setMe);
-    loadLobby().catch(() => setNotice("서버 로비 정보를 불러오지 못해 샘플 화면을 표시합니다."));
+    loadLobby().catch(() => setNotice("서버 로비 정보를 불러오지 못했습니다."));
   }, [loadLobby]);
 
   useEffect(() => {
@@ -129,6 +128,7 @@ export default function HomePage() {
             <Users size={20} /> 활성 선수
           </h2>
           <div className="mt-4 divide-y divide-line">
+            {players.length === 0 ? <p className="py-4 text-sm font-semibold text-muted">현재 표시할 활성 선수가 없습니다.</p> : null}
             {players.map((player) => (
               <div key={player.id} className="flex items-center justify-between py-3">
                 <div>
@@ -146,6 +146,7 @@ export default function HomePage() {
           </h2>
           {notice ? <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{notice}</p> : null}
           <div className="mt-4 grid gap-3">
+            {chat.length === 0 ? <div className="rounded-lg border border-dashed border-line p-3 text-sm font-semibold text-muted">아직 로비 채팅이 없습니다.</div> : null}
             {chat.map((message) => (
               <div key={message.id} className="rounded-lg bg-slate-50 p-3">
                 <p className="text-sm font-black text-blue-700">{message.sender.displayName}</p>
