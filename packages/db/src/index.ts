@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
+import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
-import { toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentSummary } from "./rowMappers";
-import type { ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
+import { toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentMatchRecord, toTournamentMatchSummary, toTournamentSummary } from "./rowMappers";
+import type { ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentMatchRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
 
 export type { Database } from "./schema";
 
@@ -26,6 +26,17 @@ type MemoryMatchRecord = CreateMatchInput & {
   id: string;
   ended_at: string;
 };
+
+export interface TournamentMatchRecord {
+  id: string;
+  tournamentId: string;
+  round: "semifinal" | "final";
+  slot: number;
+  status: "pending" | "ready" | "running" | "finished";
+  leftUserId: string | null;
+  rightUserId: string | null;
+  winnerId: string | null;
+}
 
 export interface AppRepository {
   close(): Promise<void>;
@@ -49,6 +60,9 @@ export interface AppRepository {
   listTournaments(): Promise<TournamentSummary[]>;
   createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary>;
   joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary>;
+  getTournamentMatch(matchId: string): Promise<TournamentMatchRecord | null>;
+  startTournamentMatch(matchId: string, roomId: string): Promise<void>;
+  completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary>;
   listAdminUsers(): Promise<PublicUser[]>;
   setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser>;
 }
@@ -260,6 +274,48 @@ class PostgresRepository implements AppRepository {
     return (await this.listTournaments()).find((item) => item.id === tournamentId)!;
   }
 
+  async getTournamentMatch(matchId: string): Promise<TournamentMatchRecord | null> {
+    const result = await sql<TournamentMatchRow>`select * from tournament_matches where id = ${matchId} limit 1`.execute(this.db);
+    return result.rows[0] ? toTournamentMatchRecord(result.rows[0]) : null;
+  }
+
+  async startTournamentMatch(matchId: string, roomId: string): Promise<void> {
+    await sql`
+      update tournament_matches set status = 'running', room_id = ${roomId}, updated_at = now()
+      where id = ${matchId} and status in ('ready', 'running')
+    `.execute(this.db);
+  }
+
+  async completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary> {
+    const updated = await sql<TournamentMatchRow>`
+      update tournament_matches
+      set status = 'finished', room_id = ${input.roomId}, match_id = ${input.matchId},
+          winner_id = ${input.winnerId}, score_left = ${input.scoreLeft}, score_right = ${input.scoreRight}, updated_at = now()
+      where id = ${input.tournamentMatchId} returning *
+    `.execute(this.db);
+    const row = firstRow(updated);
+    if (row.round === "semifinal") await this.ensureFinalMatch(row.tournament_id);
+    else await sql`update tournaments set status = 'finished', winner_id = ${input.winnerId} where id = ${row.tournament_id}`.execute(this.db);
+    const found = (await this.listTournaments()).find((item) => item.id === row.tournament_id);
+    if (!found) throw new Error("tournament not found");
+    return found;
+  }
+
+  private async ensureFinalMatch(tournamentId: string): Promise<void> {
+    const semis = await sql<{ winner_id: string; slot: number }>`
+      select winner_id, slot from tournament_matches
+      where tournament_id = ${tournamentId} and round = 'semifinal'
+        and status = 'finished' and winner_id is not null
+      order by slot asc
+    `.execute(this.db);
+    if (semis.rows.length < 2) return;
+    await sql`
+      insert into tournament_matches (tournament_id, round, slot, left_user_id, right_user_id, status)
+      values (${tournamentId}, 'final', 1, ${semis.rows[0].winner_id}, ${semis.rows[1].winner_id}, 'ready')
+      on conflict (tournament_id, round, slot) do nothing
+    `.execute(this.db);
+  }
+
   private async tournamentFromRow(row: TournamentWithCreatorRow): Promise<TournamentSummary> {
     const entries = await sql<UserRow>`select u.* from tournament_entries e join users u on u.id = e.user_id where e.tournament_id = ${row.id} order by e.seed asc`.execute(this.db);
     return toTournamentSummary(row, entries.rows.map((entry) => toPublicUser(entry, true)));
@@ -419,7 +475,7 @@ class MemoryRepository implements AppRepository {
   async createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary> {
     const creator = await this.getUserById(input.createdBy);
     if (!creator) throw new Error("creator not found");
-    const tournament = { id: randomUUID(), name: input.name, status: "open" as const, createdBy: creator, playerCount: 1, capacity: 4, winner: null, entries: [creator] };
+    const tournament = { id: randomUUID(), name: input.name, status: "open" as const, createdBy: creator, playerCount: 1, capacity: 4, winner: null, entries: [creator], matches: [] as TournamentMatchSummary[] };
     this.tournaments.unshift(tournament);
     return tournament;
   }
@@ -431,6 +487,34 @@ class MemoryRepository implements AppRepository {
     if (!tournament.entries.some((entry) => entry.id === user.id)) tournament.entries.push(user);
     tournament.playerCount = tournament.entries.length;
     tournament.status = tournament.playerCount >= tournament.capacity ? "running" : "open";
+    return tournament;
+  }
+
+  async getTournamentMatch(matchId: string): Promise<TournamentMatchRecord | null> {
+    for (const tournament of this.tournaments) {
+      const match = tournament.matches.find((item) => item.id === matchId);
+      if (match) return { id: match.id, tournamentId: match.tournamentId, round: match.round, slot: match.slot, status: match.status, leftUserId: match.left?.id ?? null, rightUserId: match.right?.id ?? null, winnerId: match.winner?.id ?? null };
+    }
+    return null;
+  }
+
+  async startTournamentMatch(matchId: string, roomId: string): Promise<void> {
+    const match = this.tournaments.flatMap((item) => item.matches).find((item) => item.id === matchId);
+    if (!match) throw new Error("tournament match not found");
+    match.status = "running";
+    match.roomId = roomId;
+  }
+
+  async completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary> {
+    const tournament = this.tournaments.find((item) => item.matches.some((match) => match.id === input.tournamentMatchId));
+    if (!tournament) throw new Error("tournament match not found");
+    const match = tournament.matches.find((item) => item.id === input.tournamentMatchId)!;
+    match.status = "finished";
+    match.roomId = input.roomId;
+    match.matchId = input.matchId;
+    match.winner = input.winnerId ? await this.getUserById(input.winnerId) : null;
+    match.scoreLeft = input.scoreLeft;
+    match.scoreRight = input.scoreRight;
     return tournament;
   }
 

@@ -60,7 +60,7 @@ export function toChatMessage(row: ChatMessageWithSenderRow): ChatMessage {
   };
 }
 
-export function toTournamentSummary(row: TournamentWithCreatorRow, entries: PublicUser[]): TournamentSummary {
+export function toTournamentSummary(row: TournamentWithCreatorRow, entries: PublicUser[], matches: TournamentMatchSummary[] = []): TournamentSummary {
   return {
     id: row.id,
     name: row.name,
@@ -69,7 +69,8 @@ export function toTournamentSummary(row: TournamentWithCreatorRow, entries: Publ
     playerCount: entries.length,
     capacity: Number(row.capacity),
     winner: null,
-    entries
+    entries,
+    matches
   };
 }
 
