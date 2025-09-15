@@ -71,6 +71,23 @@ export interface TournamentEntryTable {
   created_at: Generated<Date>;
 }
 
+export interface TournamentMatchTable {
+  id: Generated<string>;
+  tournament_id: string;
+  round: "semifinal" | "final";
+  slot: number;
+  status: Generated<"pending" | "ready" | "running" | "finished">;
+  left_user_id: string | null;
+  right_user_id: string | null;
+  winner_id: string | null;
+  room_id: string | null;
+  match_id: string | null;
+  score_left: number | null;
+  score_right: number | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface AdminActionTable {
   id: Generated<string>;
   actor_id: string | null;
@@ -88,6 +105,7 @@ export interface Database {
   chat_messages: ChatMessageTable;
   tournaments: TournamentTable;
   tournament_entries: TournamentEntryTable;
+  tournament_matches: TournamentMatchTable;
   admin_actions: AdminActionTable;
 }
 
@@ -120,6 +138,7 @@ export interface ChatMessageWithSenderRow extends ChatMessageRow {
 }
 
 export type TournamentRow = Selectable<TournamentTable>;
+export type TournamentMatchRow = Selectable<TournamentMatchTable>;
 export interface TournamentWithCreatorRow extends TournamentRow {
   creator_id: string;
   email: string | null;

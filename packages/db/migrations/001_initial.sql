@@ -72,6 +72,24 @@ create table if not exists tournament_entries (
   unique (tournament_id, user_id)
 );
 
+create table if not exists tournament_matches (
+  id uuid primary key default gen_random_uuid(),
+  tournament_id uuid not null references tournaments(id) on delete cascade,
+  round text not null,
+  slot integer not null,
+  status text not null default 'ready',
+  left_user_id uuid references users(id),
+  right_user_id uuid references users(id),
+  winner_id uuid references users(id),
+  room_id text,
+  match_id uuid references matches(id),
+  score_left integer,
+  score_right integer,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (tournament_id, round, slot)
+);
+
 create table if not exists admin_actions (
   id uuid primary key default gen_random_uuid(),
   actor_id uuid references users(id),
@@ -83,3 +101,4 @@ create table if not exists admin_actions (
 
 create index if not exists matches_ended_at_idx on matches (ended_at desc);
 create index if not exists chat_messages_scope_idx on chat_messages (scope, created_at desc);
+create index if not exists tournament_matches_tournament_idx on tournament_matches (tournament_id, round, slot);
