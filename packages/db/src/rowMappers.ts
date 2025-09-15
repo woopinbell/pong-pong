@@ -1,5 +1,5 @@
-import type { ChatMessage, FriendSummary, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
-import type { ChatMessageWithSenderRow, FriendshipWithUserRow, MatchWithHandlesRow, TournamentWithCreatorRow, UserProjectionRow } from "./schema";
+import type { ChatMessage, FriendSummary, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
+import type { ChatMessageWithSenderRow, FriendshipWithUserRow, MatchWithHandlesRow, TournamentMatchRow, TournamentWithCreatorRow, UserProjectionRow } from "./schema";
 
 export function toPublicUser(row: UserProjectionRow, online = false): PublicUser {
   return {
@@ -70,5 +70,38 @@ export function toTournamentSummary(row: TournamentWithCreatorRow, entries: Publ
     capacity: Number(row.capacity),
     winner: null,
     entries
+  };
+}
+
+export function toTournamentMatchRecord(row: TournamentMatchRow) {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    round: row.round,
+    slot: Number(row.slot),
+    status: row.status,
+    leftUserId: row.left_user_id,
+    rightUserId: row.right_user_id,
+    winnerId: row.winner_id
+  };
+}
+
+export function toTournamentMatchSummary(
+  row: TournamentMatchRow,
+  users: { left: PublicUser | null; right: PublicUser | null; winner: PublicUser | null }
+): TournamentMatchSummary {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    round: row.round,
+    slot: Number(row.slot),
+    status: row.status,
+    left: users.left,
+    right: users.right,
+    winner: users.winner,
+    scoreLeft: row.score_left,
+    scoreRight: row.score_right,
+    roomId: row.room_id,
+    matchId: row.match_id
   };
 }
