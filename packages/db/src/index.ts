@@ -270,8 +270,19 @@ class PostgresRepository implements AppRepository {
 
   async joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary> {
     const count = await sql<{ count: string }>`select count(*)::text from tournament_entries where tournament_id = ${tournamentId}`.execute(this.db);
-    await sql`insert into tournament_entries (tournament_id, user_id, seed) values (${tournamentId}, ${userId}, ${Number(firstRow(count).count) + 1}) on conflict (tournament_id, user_id) do nothing`.execute(this.db);
-    return (await this.listTournaments()).find((item) => item.id === tournamentId)!;
+    const status = await sql<{ capacity: number; joined: boolean }>`
+      select capacity, exists(select 1 from tournament_entries where tournament_id = ${tournamentId} and user_id = ${userId}) as joined
+      from tournaments where id = ${tournamentId} limit 1
+    `.execute(this.db);
+    const tournament = firstRow(status);
+    if (!tournament.joined && Number(firstRow(count).count) >= Number(tournament.capacity)) throw new Error("tournament full");
+    const seed = Number(firstRow(count).count) + 1;
+    await sql`insert into tournament_entries (tournament_id, user_id, seed) values (${tournamentId}, ${userId}, ${seed}) on conflict (tournament_id, user_id) do nothing`.execute(this.db);
+    await sql`update tournaments set status = case when (select count(*) from tournament_entries where tournament_id = ${tournamentId}) >= capacity then 'running' else status end where id = ${tournamentId}`.execute(this.db);
+    await this.ensureTournamentBracket(tournamentId);
+    const found = (await this.listTournaments()).find((item) => item.id === tournamentId);
+    if (!found) throw new Error("tournament not found");
+    return found;
   }
 
   async getTournamentMatch(matchId: string): Promise<TournamentMatchRecord | null> {
@@ -318,7 +329,32 @@ class PostgresRepository implements AppRepository {
 
   private async tournamentFromRow(row: TournamentWithCreatorRow): Promise<TournamentSummary> {
     const entries = await sql<UserRow>`select u.* from tournament_entries e join users u on u.id = e.user_id where e.tournament_id = ${row.id} order by e.seed asc`.execute(this.db);
-    return toTournamentSummary(row, entries.rows.map((entry) => toPublicUser(entry, true)));
+    const matches = await sql<TournamentMatchRow>`
+      select * from tournament_matches where tournament_id = ${row.id}
+      order by case when round = 'semifinal' then 1 else 2 end, slot asc
+    `.execute(this.db);
+    const summaries = await Promise.all(matches.rows.map(async (match) => toTournamentMatchSummary(match, {
+      left: match.left_user_id ? await this.getUserById(match.left_user_id) : null,
+      right: match.right_user_id ? await this.getUserById(match.right_user_id) : null,
+      winner: match.winner_id ? await this.getUserById(match.winner_id) : null
+    })));
+    const summary = toTournamentSummary(row, entries.rows.map((entry) => toPublicUser(entry, true)), summaries);
+    summary.winner = row.winner_id ? await this.getUserById(row.winner_id) : null;
+    return summary;
+  }
+
+  private async ensureTournamentBracket(tournamentId: string): Promise<void> {
+    const entries = await sql<{ user_id: string; seed: number }>`
+      select user_id, seed from tournament_entries where tournament_id = ${tournamentId} order by seed asc
+    `.execute(this.db);
+    if (entries.rows.length < 4) return;
+    await sql`
+      insert into tournament_matches (tournament_id, round, slot, left_user_id, right_user_id, status)
+      values
+        (${tournamentId}, 'semifinal', 1, ${entries.rows[0].user_id}, ${entries.rows[3].user_id}, 'ready'),
+        (${tournamentId}, 'semifinal', 2, ${entries.rows[1].user_id}, ${entries.rows[2].user_id}, 'ready')
+      on conflict (tournament_id, round, slot) do nothing
+    `.execute(this.db);
   }
 
   async listAdminUsers(): Promise<PublicUser[]> {
