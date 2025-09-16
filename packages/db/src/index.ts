@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
+import type { AdminActionSummary, ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
 import { initialMigrationSql } from "./migrations";
-import { toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentMatchRecord, toTournamentMatchSummary, toTournamentSummary } from "./rowMappers";
-import type { ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentMatchRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
+import { toAdminActionSummary, toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentMatchRecord, toTournamentMatchSummary, toTournamentSummary } from "./rowMappers";
+import type { AdminActionRow, ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentMatchRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
 
 export type { Database } from "./schema";
 
@@ -64,6 +64,7 @@ export interface AppRepository {
   startTournamentMatch(matchId: string, roomId: string): Promise<void>;
   completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary>;
   listAdminUsers(): Promise<PublicUser[]>;
+  listAdminActions(): Promise<AdminActionSummary[]>;
   setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser>;
 }
 
@@ -362,6 +363,14 @@ class PostgresRepository implements AppRepository {
     return result.rows.map((row) => toPublicUser(row, true));
   }
 
+  async listAdminActions(): Promise<AdminActionSummary[]> {
+    const result = await sql<AdminActionRow>`select * from admin_actions order by created_at desc limit 30`.execute(this.db);
+    return Promise.all(result.rows.map(async (row) => toAdminActionSummary(row, {
+      actor: row.actor_id ? await this.getUserById(row.actor_id) : null,
+      target: row.target_user_id ? await this.getUserById(row.target_user_id) : null
+    })));
+  }
+
   async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
     const result = await sql<UserRow>`update users set status = ${banned ? "banned" : "active"}, banned_at = ${banned ? sql`now()` : null} where id = ${targetUserId} returning *`.execute(this.db);
     await sql`insert into admin_actions (actor_id, target_user_id, action, reason) values (${actorId}, ${targetUserId}, ${banned ? "ban" : "unban"}, ${reason})`.execute(this.db);
@@ -377,6 +386,7 @@ class MemoryRepository implements AppRepository {
   private readonly friendships: FriendSummary[] = [];
   private readonly chats: ChatMessage[] = [];
   private readonly tournaments: TournamentSummary[] = [];
+  private readonly adminActions: AdminActionSummary[] = [];
 
   async close(): Promise<void> {}
 
@@ -579,11 +589,15 @@ class MemoryRepository implements AppRepository {
 
   async listAdminUsers(): Promise<PublicUser[]> { return this.listOnlineUsers(); }
 
-  async setUserBan(_actorId: string, targetUserId: string, banned: boolean): Promise<PublicUser> {
+  async listAdminActions(): Promise<AdminActionSummary[]> { return this.adminActions; }
+
+  async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
     const user = this.users.get(targetUserId);
     if (!user) throw new Error("user not found");
     user.status = banned ? "banned" : "active";
-    return toPublicUser(user, true);
+    const target = toPublicUser(user, true);
+    this.adminActions.unshift({ id: randomUUID(), actor: await this.getUserById(actorId), target, action: banned ? "ban" : "unban", reason, createdAt: new Date().toISOString() });
+    return target;
   }
 
 }

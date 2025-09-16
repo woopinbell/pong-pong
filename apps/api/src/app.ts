@@ -33,6 +33,10 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
             socket.close(1008, "unauthorized");
             return;
           }
+          if (user.status !== "active") {
+            socket.close(1008, "account suspended");
+            return;
+          }
           socket.off("message", bufferPayload);
           hub.connect(socket as WebSocket, request.raw, user, pendingPayloads);
         })
@@ -97,6 +101,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.post("/chat/lobby", async (request, reply) => {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
+    if (!isActive(user)) return suspended(reply);
     const body = (request.body ?? {}) as { body?: string };
     const messageBody = body.body?.trim() ?? "";
     if (!messageBody) return reply.code(400).send({ message: "메시지를 입력해주세요." });
@@ -156,6 +161,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.post("/friends/request", async (request, reply) => {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
+    if (!isActive(user)) return suspended(reply);
     const body = request.body as { handle?: string };
     return { friend: await repo.requestFriend(user.id, body.handle ?? "") };
   });
@@ -163,6 +169,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.post("/friends", async (request, reply) => {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
+    if (!isActive(user)) return suspended(reply);
     const body = request.body as { handle?: string };
     return { friend: await repo.requestFriend(user.id, body.handle ?? "") };
   });
@@ -179,6 +186,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.post("/tournaments", async (request, reply) => {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
+    if (!isActive(user)) return suspended(reply);
     const body = request.body as { name?: string };
     return { tournament: await repo.createTournament({ name: body.name ?? "퐁퐁 주간 컵", createdBy: user.id }) };
   });
@@ -186,6 +194,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   app.post("/tournaments/:id/join", async (request, reply) => {
     const user = await currentUser(repo, request);
     if (!user) return unauthorized(reply);
+    if (!isActive(user)) return suspended(reply);
     const { id } = request.params as { id: string };
     return { tournament: await repo.joinTournament(id, user.id) };
   });
@@ -195,6 +204,13 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     if (!user) return unauthorized(reply);
     if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
     return { users: await repo.listAdminUsers() };
+  });
+
+  app.get("/admin/actions", async (request, reply) => {
+    const user = await currentUser(repo, request);
+    if (!user) return unauthorized(reply);
+    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
+    return { actions: await repo.listAdminActions() };
   });
 
   app.post("/admin/users/:id/ban", async (request, reply) => {
@@ -228,4 +244,12 @@ async function currentUser(repo: AppRepository, request: FastifyRequest): Promis
 
 function unauthorized(reply: FastifyReply) {
   return reply.code(401).send({ message: "로그인이 필요합니다." });
+}
+
+function suspended(reply: FastifyReply) {
+  return reply.code(403).send({ message: "정지된 계정은 이 작업을 수행할 수 없습니다." });
+}
+
+function isActive(user: SessionUser): boolean {
+  return user.status === "active";
 }

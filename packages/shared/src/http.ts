@@ -102,3 +102,12 @@ export interface TournamentMatchSummary {
   roomId: string | null;
   matchId: string | null;
 }
+
+export interface AdminActionSummary {
+  id: string;
+  actor: PublicUser | null;
+  target: PublicUser | null;
+  action: "ban" | "unban";
+  reason: string;
+  createdAt: string;
+}

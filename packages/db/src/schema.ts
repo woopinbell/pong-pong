@@ -97,6 +97,8 @@ export interface AdminActionTable {
   created_at: Generated<Date>;
 }
 
+export type AdminActionRow = Selectable<AdminActionTable>;
+
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
