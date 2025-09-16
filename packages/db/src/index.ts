@@ -520,9 +520,12 @@ class MemoryRepository implements AppRepository {
     const tournament = this.tournaments.find((item) => item.id === tournamentId);
     const user = await this.getUserById(userId);
     if (!tournament || !user) throw new Error("tournament not found");
-    if (!tournament.entries.some((entry) => entry.id === user.id)) tournament.entries.push(user);
+    const joined = tournament.entries.some((entry) => entry.id === user.id);
+    if (!joined && tournament.entries.length >= tournament.capacity) throw new Error("tournament full");
+    if (!joined) tournament.entries.push(user);
     tournament.playerCount = tournament.entries.length;
     tournament.status = tournament.playerCount >= tournament.capacity ? "running" : "open";
+    this.ensureMemoryBracket(tournament);
     return tournament;
   }
 
@@ -551,7 +554,27 @@ class MemoryRepository implements AppRepository {
     match.winner = input.winnerId ? await this.getUserById(input.winnerId) : null;
     match.scoreLeft = input.scoreLeft;
     match.scoreRight = input.scoreRight;
+    if (match.round === "semifinal") this.ensureMemoryFinal(tournament);
+    else {
+      tournament.status = "finished";
+      tournament.winner = match.winner;
+    }
     return tournament;
+  }
+
+  private ensureMemoryBracket(tournament: TournamentSummary): void {
+    if (tournament.entries.length < tournament.capacity || tournament.matches.some((match) => match.round === "semifinal")) return;
+    tournament.matches.push(
+      memoryTournamentMatch(tournament.id, "semifinal", 1, tournament.entries[0], tournament.entries[3]),
+      memoryTournamentMatch(tournament.id, "semifinal", 2, tournament.entries[1], tournament.entries[2])
+    );
+  }
+
+  private ensureMemoryFinal(tournament: TournamentSummary): void {
+    if (tournament.matches.some((match) => match.round === "final")) return;
+    const semis = tournament.matches.filter((match) => match.round === "semifinal" && match.status === "finished" && match.winner).sort((a, b) => a.slot - b.slot);
+    if (semis.length < 2) return;
+    tournament.matches.push(memoryTournamentMatch(tournament.id, "final", 1, semis[0].winner, semis[1].winner));
   }
 
   async listAdminUsers(): Promise<PublicUser[]> { return this.listOnlineUsers(); }
@@ -598,4 +621,8 @@ function memoryMatchSummary(row: MemoryMatchRecord, userId?: string): MatchSumma
     ratingDelta: won ? 16 : -12,
     endedAt: new Date(row.ended_at).toISOString()
   };
+}
+
+function memoryTournamentMatch(tournamentId: string, round: "semifinal" | "final", slot: number, left: PublicUser | null, right: PublicUser | null): TournamentMatchSummary {
+  return { id: randomUUID(), tournamentId, round, slot, status: "ready", left, right, winner: null, scoreLeft: null, scoreRight: null, roomId: null, matchId: null };
 }
