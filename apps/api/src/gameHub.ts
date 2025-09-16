@@ -13,6 +13,7 @@ import {
   parseClientEvent,
   type GameFinished,
   type GameSnapshot,
+  type MatchMode,
   type PlayerSide,
   type ServerEvent,
   type SessionUser
@@ -37,12 +38,15 @@ type Room = {
   ready: Partial<Record<PlayerSide, boolean>>;
   snapshot: GameSnapshot;
   timer: NodeJS.Timeout | null;
+  mode: MatchMode;
+  tournamentMatchId: string | null;
 };
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
   private readonly queue: QueueEntry[] = [];
   private readonly rooms = new Map<string, Room>();
+  private readonly tournamentWaiters = new Map<string, Client[]>();
   private readonly waitSamples: number[] = [];
 
   constructor(private readonly repo: AppRepository) {}
@@ -63,6 +67,7 @@ export class GameHub {
       const event = parseClientEvent(payload);
       if (event.type === "queue.join") this.joinQueue(client, event.mode);
       if (event.type === "queue.leave") this.leaveQueue(client);
+      if (event.type === "tournament.join") await this.joinTournamentMatch(client, event.matchId);
       if (event.type === "game.ready") this.markReady(client, event.roomId);
       if (event.type === "game.pause") this.pauseRoom(client, event.roomId);
       if (event.type === "game.resume") this.resumeRoom(client, event.roomId);
@@ -87,6 +92,7 @@ export class GameHub {
 
   private disconnect(client: Client): void {
     this.leaveQueue(client);
+    this.leaveTournamentWaiters(client);
     this.clients.delete(client.id);
     if (client.roomId) {
       const room = this.rooms.get(client.roomId);
@@ -101,7 +107,7 @@ export class GameHub {
     this.leaveQueue(client);
     this.pruneQueue();
     if (mode === "ai") {
-      this.createRoom(client, null, true);
+      this.createRoom(client, null, { ai: true, mode: "ai" });
       return;
     }
     const opponentIndex = this.findClosestQueuedOpponent(client);
@@ -112,7 +118,38 @@ export class GameHub {
     }
     const [opponent] = this.queue.splice(opponentIndex, 1);
     this.recordWaitSample(opponent.queuedAt);
-    this.createRoom(opponent.client, client, false);
+    this.createRoom(opponent.client, client, { ai: false, mode: "queue" });
+  }
+
+  private async joinTournamentMatch(client: Client, matchId: string): Promise<void> {
+    this.leaveQueue(client);
+    this.leaveTournamentWaiters(client);
+    const match = await this.repo.getTournamentMatch(matchId);
+    if (!match || match.status !== "ready") {
+      this.send(client, { type: "error", message: "참가할 수 없는 토너먼트 경기입니다." });
+      return;
+    }
+    if (match.leftUserId !== client.user.id && match.rightUserId !== client.user.id) {
+      this.send(client, { type: "error", message: "토너먼트 경기 참가자가 아닙니다." });
+      return;
+    }
+    if (client.roomId) {
+      this.send(client, { type: "error", message: "이미 진행 중인 경기가 있습니다." });
+      return;
+    }
+    const waiters = this.tournamentWaiters.get(matchId) ?? [];
+    const existing = waiters.find((waiter) => waiter.user.id === client.user.id);
+    if (existing) return;
+    const opponent = waiters.find((waiter) => waiter.user.id === match.leftUserId || waiter.user.id === match.rightUserId);
+    if (!opponent) {
+      this.tournamentWaiters.set(matchId, [...waiters, client]);
+      return;
+    }
+    this.tournamentWaiters.delete(matchId);
+    const left = client.user.id === match.leftUserId ? client : opponent;
+    const right = left === client ? opponent : client;
+    const roomId = this.createRoom(left, right, { ai: false, mode: "tournament", tournamentMatchId: matchId });
+    await this.repo.startTournamentMatch(matchId, roomId);
   }
 
   private findClosestQueuedOpponent(client: Client): number {
@@ -132,6 +169,14 @@ export class GameHub {
   private leaveQueue(client: Client): void {
     const index = this.queue.findIndex((queued) => queued.client.id === client.id);
     if (index >= 0) this.queue.splice(index, 1);
+  }
+
+  private leaveTournamentWaiters(client: Client): void {
+    for (const [matchId, waiters] of this.tournamentWaiters.entries()) {
+      const next = waiters.filter((waiter) => waiter.id !== client.id);
+      if (next.length === 0) this.tournamentWaiters.delete(matchId);
+      else this.tournamentWaiters.set(matchId, next);
+    }
   }
 
   private pruneQueue(): void {
@@ -164,14 +209,16 @@ export class GameHub {
     }
   }
 
-  private createRoom(left: Client, right: Client | null, ai: boolean): void {
+  private createRoom(left: Client, right: Client | null, options: { ai: boolean; mode: MatchMode; tournamentMatchId?: string | null }): string {
     const roomId = randomUUID();
     const room: Room = {
       id: roomId,
       clients: { left, ...(right ? { right } : {}) },
-      ai,
+      ai: options.ai,
       ready: {},
       timer: null,
+      mode: options.mode,
+      tournamentMatchId: options.tournamentMatchId ?? null,
       snapshot: {
         roomId,
         phase: "waiting",
@@ -193,8 +240,8 @@ export class GameHub {
             handle: right?.user.handle ?? "ai",
             displayName: right?.user.displayName ?? "연습 AI",
             side: "right",
-            ready: ai,
-            ai
+            ready: options.ai,
+            ai: options.ai
           }
         ],
         serverTime: new Date().toISOString()
@@ -207,6 +254,7 @@ export class GameHub {
     if (right) this.send(right, { type: "queue.matched", roomId, side: "right", opponent: left.user.displayName });
     this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
     this.broadcastPresence();
+    return roomId;
   }
 
   private markReady(client: Client, roomId: string): void {
@@ -298,7 +346,7 @@ export class GameHub {
     const winner = winnerSide === "left" ? room.clients.left : room.clients.right;
     const loser = winnerSide === "left" ? room.clients.right : room.clients.left;
     const matchId = await this.repo.createMatch({
-      mode: room.ai ? "ai" : "queue",
+      mode: room.mode,
       winnerId: winner?.user.id ?? null,
       loserId: loser?.user.id ?? null,
       scoreLeft: room.snapshot.leftScore,
@@ -313,6 +361,16 @@ export class GameHub {
       ratingDelta: 16
     };
     this.broadcastRoom(room.id, { type: "game.finished", result });
+    if (room.tournamentMatchId) {
+      await this.repo.completeTournamentMatch({
+        tournamentMatchId: room.tournamentMatchId,
+        roomId: room.id,
+        matchId,
+        winnerId: winner?.user.id ?? null,
+        scoreLeft: room.snapshot.leftScore,
+        scoreRight: room.snapshot.rightScore
+      });
+    }
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
     }
