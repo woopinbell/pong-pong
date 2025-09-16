@@ -2,17 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { Plus, Trophy } from "lucide-react";
-import type { TournamentSummary } from "@pong-pong/shared";
+import type { SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
-import { createTournament, getTournaments, joinTournament } from "@/lib/api";
+import { createTournament, getMe, getTournaments, joinTournament } from "@/lib/api";
 
 export default function TournamentsPage() {
   const [items, setItems] = useState<TournamentSummary[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [message, setMessage] = useState("대회 목록을 불러오는 중입니다.");
+  const [me, setMe] = useState<SessionUser | null>(null);
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
 
   useEffect(() => {
+    getMe().then(setMe);
     getTournaments()
       .then((tournaments) => {
         setItems(tournaments);
@@ -90,6 +92,7 @@ export default function TournamentsPage() {
                 <p className="font-black text-ink">{selected.name}</p>
                 <p className="mt-1 text-sm font-semibold text-muted">
                   {selected.playerCount} / {selected.capacity}명 · {selected.status === "open" ? "모집 중" : selected.status === "running" ? "진행 중" : "종료"}
+                  {selected.winner ? ` · 우승 ${selected.winner.displayName}` : ""}
                 </p>
               </div>
               <button className="focus-ring rounded-lg bg-green-600 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" onClick={join} disabled={selected.playerCount >= selected.capacity}>
@@ -98,22 +101,52 @@ export default function TournamentsPage() {
             </div>
           ) : null}
           <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {["1라운드", "결승", "우승"].map((round, index) => (
-              <div key={round} className="rounded-lg border border-line bg-slate-50 p-4">
-                <p className="font-black text-blue-700">{round}</p>
-                <div className="mt-4 grid gap-3">
-                  {(selected?.entries ?? []).slice(index, index + 2).map((entry) => (
-                    <div key={entry.id} className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-ink shadow-sm">
-                      {entry.displayName}
-                    </div>
-                  ))}
-                  {index === 2 ? <div className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-muted shadow-sm">대기 중</div> : null}
-                </div>
-              </div>
-            ))}
+            <BracketColumn title="준결승" matches={(selected?.matches ?? []).filter((match) => match.round === "semifinal")} me={me} />
+            <BracketColumn title="결승" matches={(selected?.matches ?? []).filter((match) => match.round === "final")} me={me} />
+            <div className="rounded-lg border border-line bg-slate-50 p-4">
+              <p className="font-black text-blue-700">우승</p>
+              <div className="mt-4 rounded-lg bg-white px-3 py-2 text-sm font-bold text-ink shadow-sm">{selected?.winner?.displayName ?? "대기 중"}</div>
+            </div>
           </div>
+          {selected && selected.matches.length === 0 ? <p className="mt-4 text-sm font-semibold text-muted">4명이 참가하면 실제 경기 브래킷이 생성됩니다.</p> : null}
         </div>
       </section>
     </AppShell>
   );
+}
+
+function BracketColumn({ title, matches, me }: { title: string; matches: TournamentMatchSummary[]; me: SessionUser | null }) {
+  return (
+    <div className="rounded-lg border border-line bg-slate-50 p-4">
+      <p className="font-black text-blue-700">{title}</p>
+      <div className="mt-4 grid gap-3">
+        {matches.length === 0 ? <div className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-muted shadow-sm">대기 중</div> : null}
+        {matches.map((match) => {
+          const participant = Boolean(me && (match.left?.id === me.id || match.right?.id === me.id));
+          const canEnter = participant && match.status === "ready";
+          return (
+            <div key={match.id} className="rounded-lg bg-white px-3 py-2 text-sm font-bold text-ink shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span>{match.left?.displayName ?? "대기"}</span>
+                <span className="text-muted">vs</span>
+                <span>{match.right?.displayName ?? "대기"}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted">
+                <span>{match.status === "finished" ? `${match.scoreLeft} - ${match.scoreRight}` : statusLabel(match.status)}</span>
+                {canEnter ? <a className="rounded-md bg-blue-600 px-2 py-1 font-black text-white" href={`/play?tournamentMatchId=${match.id}`}>경기 입장</a> : null}
+              </div>
+              {match.winner ? <p className="mt-2 text-xs font-black text-green-600">승자 {match.winner.displayName}</p> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function statusLabel(status: TournamentMatchSummary["status"]): string {
+  if (status === "ready") return "입장 가능";
+  if (status === "running") return "진행 중";
+  if (status === "finished") return "종료";
+  return "대기 중";
 }

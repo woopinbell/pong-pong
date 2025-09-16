@@ -25,8 +25,25 @@ export default function PlayPage() {
   const canPause = Boolean(roomId && phase === "playing");
   const canResume = Boolean(roomId && phase === "paused");
   const opponentName = snapshot?.players.find((player) => player.side === "right")?.displayName ?? "대기 중";
+  const autoStartedRef = useRef(false);
 
   useEffect(() => () => closeCurrentSocket(), []);
+
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const tournamentMatchId = params.get("tournamentMatchId");
+    const mode = params.get("mode");
+    if (tournamentMatchId) {
+      autoStartedRef.current = true;
+      connectTournament(tournamentMatchId);
+      return;
+    }
+    if (mode === "ai") {
+      autoStartedRef.current = true;
+      connect("ai");
+    }
+  }, []);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -64,6 +81,14 @@ export default function PlayPage() {
   }, [roomId, phase]);
 
   function connect(mode: "queue" | "ai") {
+    openGameSocket(mode === "ai" ? "인공지능 연습 방 생성 중" : "매칭 큐 참가 중", { type: "queue.join", mode });
+  }
+
+  function connectTournament(matchId: string) {
+    openGameSocket("토너먼트 경기 상대 입장 대기 중", { type: "tournament.join", matchId });
+  }
+
+  function openGameSocket(openStatus: string, payload: Record<string, unknown>) {
     const token = getToken();
     if (!token) {
       setStatus("로그인 후 이용할 수 있습니다.");
@@ -78,8 +103,8 @@ export default function PlayPage() {
     const socket = new WebSocket(`${WS_URL}?session=${token}`);
     socketRef.current = socket;
     socket.onopen = () => {
-      setStatus(mode === "ai" ? "인공지능 연습 방 생성 중" : "매칭 큐 참가 중");
-      socket.send(JSON.stringify({ type: "queue.join", mode }));
+      setStatus(openStatus);
+      socket.send(JSON.stringify(payload));
     };
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as ServerEvent;
