@@ -38,11 +38,26 @@ describe("memory repository", () => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData();
     const me = await repo.upsertDevUser({ handle: "me", displayName: "나" });
+    const p2 = await repo.upsertDevUser({ handle: "p2", displayName: "둘" });
+    const p3 = await repo.upsertDevUser({ handle: "p3", displayName: "셋" });
+    const p4 = await repo.upsertDevUser({ handle: "p4", displayName: "넷" });
     const friend = await repo.requestFriend(me.id, "spin-doctor");
     const tournament = await repo.createTournament({ name: "테스트 컵", createdBy: me.id });
+    await repo.joinTournament(tournament.id, p2.id);
+    await repo.joinTournament(tournament.id, p3.id);
+    const full = await repo.joinTournament(tournament.id, p4.id);
+    const [semiA, semiB] = full.matches.filter((match) => match.round === "semifinal");
+    const semiMatchA = await repo.createMatch({ mode: "tournament", winnerId: me.id, loserId: p4.id, scoreLeft: 3, scoreRight: 1 });
+    const semiMatchB = await repo.createMatch({ mode: "tournament", winnerId: p2.id, loserId: p3.id, scoreLeft: 3, scoreRight: 2 });
+    await repo.completeTournamentMatch({ tournamentMatchId: semiA.id, roomId: "room-a", matchId: semiMatchA, winnerId: me.id, scoreLeft: 3, scoreRight: 1 });
+    const withFinal = await repo.completeTournamentMatch({ tournamentMatchId: semiB.id, roomId: "room-b", matchId: semiMatchB, winnerId: p2.id, scoreLeft: 3, scoreRight: 2 });
+    const final = withFinal.matches.find((match) => match.round === "final");
 
     expect(friend.status).toBe("pending");
-    expect(tournament.playerCount).toBe(1);
+    expect(full.playerCount).toBe(4);
+    expect(full.matches.filter((match) => match.round === "semifinal")).toHaveLength(2);
+    expect(final?.left?.id).toBe(me.id);
+    expect(final?.right?.id).toBe(p2.id);
     expect((await repo.listTournaments())[0].name).toBe("테스트 컵");
   });
 });

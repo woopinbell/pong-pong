@@ -37,4 +37,32 @@ describe("tournament routes", () => {
     expect(created.statusCode).toBe(200);
     expect(listed.json<{ tournaments: Array<{ name: string }> }>().tournaments[0].name).toBe("목요일 컵");
   });
+
+  it("creates semifinal matches when a cup fills", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/tournaments",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { name: "브래킷 컵" }
+    });
+    const tournamentId = created.json<{ tournament: { id: string } }>().tournament.id;
+    for (const handle of ["cup-two", "cup-three", "cup-four"]) {
+      const login = await app.inject({
+        method: "POST",
+        url: "/auth/dev-login",
+        payload: { handle, displayName: handle }
+      });
+      await app.inject({
+        method: "POST",
+        url: `/tournaments/${tournamentId}/join`,
+        headers: { authorization: `Bearer ${login.json<{ token: string }>().token}` }
+      });
+    }
+    const listed = await app.inject({ method: "GET", url: "/tournaments" });
+    const cup = listed.json<{ tournaments: Array<{ id: string; status: string; matches: Array<{ round: string; status: string }> }> }>().tournaments.find((item) => item.id === tournamentId);
+
+    expect(cup?.status).toBe("running");
+    expect(cup?.matches.filter((match) => match.round === "semifinal")).toHaveLength(2);
+    expect(cup?.matches.every((match) => match.status === "ready")).toBe(true);
+  });
 });

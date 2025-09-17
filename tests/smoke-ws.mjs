@@ -14,6 +14,9 @@ rightSocket.addEventListener("message", (event) => events.push({ side: "right", 
 try {
   await opened(leftSocket);
   await opened(rightSocket);
+  leftSocket.send(JSON.stringify({ type: "chat.send", scope: "lobby", roomId: null, body: "로비 실시간 확인" }));
+  await waitFor(() => events.find((item) => item.event.type === "chat.message" && item.event.message.scope === "lobby"));
+
   leftSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
   rightSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
 
@@ -25,6 +28,10 @@ try {
   leftSocket.send(JSON.stringify({ type: "game.ready", roomId }));
   rightSocket.send(JSON.stringify({ type: "game.ready", roomId }));
   await waitFor(() => events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "playing"));
+  leftSocket.send(JSON.stringify({ type: "game.pause", roomId }));
+  await waitFor(() => events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "paused"));
+  leftSocket.send(JSON.stringify({ type: "game.resume", roomId }));
+  await waitFor(() => events.filter((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "playing").length >= 2);
 
   leftSocket.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body: "준비됐습니다." }));
   await waitFor(() => events.find((item) => item.event.type === "chat.message"));

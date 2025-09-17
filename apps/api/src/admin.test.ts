@@ -38,8 +38,21 @@ describe("admin routes", () => {
       headers: { authorization: `Bearer ${adminToken}` },
       payload: { banned: true, reason: "smoke" }
     });
+    const actions = await app.inject({
+      method: "GET",
+      url: "/admin/actions",
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    const blockedChat = await app.inject({
+      method: "POST",
+      url: "/chat/lobby",
+      headers: { authorization: `Bearer ${targetLogin.json<{ token: string }>().token}` },
+      payload: { body: "정지 후 채팅" }
+    });
 
     expect(ban.statusCode).toBe(200);
     expect(ban.json<{ user: { status: string } }>().user.status).toBe("banned");
+    expect(actions.json<{ actions: Array<{ reason: string }> }>().actions[0].reason).toBe("smoke");
+    expect(blockedChat.statusCode).toBe(403);
   });
 });

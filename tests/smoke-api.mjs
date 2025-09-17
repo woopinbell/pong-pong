@@ -14,6 +14,18 @@ await request("/chat/lobby", {
 });
 await request("/leaderboard");
 await request("/dashboard", { headers: { authorization: `Bearer ${login.token}` } });
+await request("/tournaments");
+await request("/tournaments", {
+  method: "POST",
+  headers: { authorization: `Bearer ${login.token}` },
+  body: JSON.stringify({ name: "스모크 컵" })
+});
+
+const admin = await request("/auth/dev-login", {
+  method: "POST",
+  body: JSON.stringify({ handle: "admin", displayName: "운영자" })
+});
+await request("/admin/actions", { headers: { authorization: `Bearer ${admin.token}` } });
 
 console.log("api smoke ok");
 
