@@ -198,7 +198,8 @@ class PostgresRepository implements AppRepository {
   async getDashboard(userId: string): Promise<DashboardSummary> {
     const user = await this.getUserById(userId);
     if (!user) throw new Error("user not found");
-    return { me: { ...user, email: null }, recentMatches: await this.listRecentMatches(userId), winRate: percentage(user.wins, user.losses), bestStreak: Math.max(1, Math.min(12, user.wins - user.losses + 3)) };
+    const recentMatches = await this.listRecentMatches(userId);
+    return { me: { ...user, email: null }, recentMatches, winRate: percentage(user.wins, user.losses), bestStreak: bestWinningStreak(recentMatches) };
   }
 
   async listFriends(userId: string): Promise<FriendSummary[]> {
@@ -476,7 +477,8 @@ class MemoryRepository implements AppRepository {
   async getDashboard(userId: string): Promise<DashboardSummary> {
     const user = await this.getUserById(userId);
     if (!user) throw new Error("user not found");
-    return { me: { ...user, email: null }, recentMatches: await this.listRecentMatches(userId), winRate: percentage(user.wins, user.losses), bestStreak: 3 };
+    const recentMatches = await this.listRecentMatches(userId);
+    return { me: { ...user, email: null }, recentMatches, winRate: percentage(user.wins, user.losses), bestStreak: bestWinningStreak(recentMatches) };
   }
 
   async listFriends(): Promise<FriendSummary[]> { return this.friendships; }
@@ -635,6 +637,20 @@ function memoryMatchSummary(row: MemoryMatchRecord, userId?: string): MatchSumma
     ratingDelta: won ? 16 : -12,
     endedAt: new Date(row.ended_at).toISOString()
   };
+}
+
+function bestWinningStreak(matches: MatchSummary[]): number {
+  let best = 0;
+  let current = 0;
+  for (const match of [...matches].reverse()) {
+    if (match.result === "win") {
+      current += 1;
+      best = Math.max(best, current);
+    } else {
+      current = 0;
+    }
+  }
+  return best;
 }
 
 function memoryTournamentMatch(tournamentId: string, round: "semifinal" | "final", slot: number, left: PublicUser | null, right: PublicUser | null): TournamentMatchSummary {
