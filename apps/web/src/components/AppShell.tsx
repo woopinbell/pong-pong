@@ -12,13 +12,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<SessionUser | null>(null);
   const profileHref = me ? `/profile/${me.handle}` : "/";
   const nav = [
-    { href: "/", label: "로비", icon: Home },
-    { href: "/play", label: "경기", icon: Gamepad2 },
-    { href: "/dashboard", label: "대시보드", icon: BarChart3 },
-    { href: "/leaderboard", label: "순위표", icon: Trophy },
-    { href: "/tournaments", label: "토너먼트", icon: Users },
-    { href: profileHref, label: "프로필", icon: UserRound, matchPrefix: "/profile" },
-    { href: "/admin", label: "관리", icon: Shield }
+    { id: "lobby", href: "/", label: "로비", icon: Home },
+    { id: "play", href: "/play", label: "경기", icon: Gamepad2 },
+    { id: "dashboard", href: "/dashboard", label: "대시보드", icon: BarChart3 },
+    { id: "leaderboard", href: "/leaderboard", label: "순위표", icon: Trophy },
+    { id: "tournaments", href: "/tournaments", label: "토너먼트", icon: Users },
+    { id: "profile", href: profileHref, label: "프로필", icon: UserRound, matchPrefix: "/profile" },
+    { id: "admin", href: "/admin", label: "관리", icon: Shield }
   ];
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               const active = pathname === item.href || Boolean(item.matchPrefix && pathname.startsWith(item.matchPrefix)) || (item.href !== "/" && pathname.startsWith(item.href));
               return (
                 <Link
-                  key={item.href}
+                  key={item.id}
                   href={item.href}
                   className={`focus-ring flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-bold transition ${
                     active ? "bg-blue-50 text-blue-700" : "text-muted hover:bg-slate-50 hover:text-ink"
