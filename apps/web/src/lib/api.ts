@@ -1,4 +1,4 @@
-import type { ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, LobbyResponse, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
+import type { AdminActionSummary, ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, LobbyResponse, MatchSummary, PublicUser, SessionUser, TournamentSummary } from "@pong-pong/shared";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
@@ -84,9 +84,13 @@ export async function requestFriend(handle: string): Promise<FriendSummary> {
   return (await apiFetch<{ friend: FriendSummary }>("/friends/request", { method: "POST", body: JSON.stringify({ handle }) })).friend;
 }
 
-export async function setUserStatus(id: string, status: "active" | "banned"): Promise<PublicUser> {
+export async function getAdminActions(): Promise<AdminActionSummary[]> {
+  return (await apiFetch<{ actions: AdminActionSummary[] }>("/admin/actions")).actions;
+}
+
+export async function setUserStatus(id: string, status: "active" | "banned", reason: string): Promise<PublicUser> {
   return (await apiFetch<{ user: PublicUser }>(`/admin/users/${id}/status`, {
     method: "PATCH",
-    body: JSON.stringify({ status, reason: "operator review" })
+    body: JSON.stringify({ status, reason })
   })).user;
 }
