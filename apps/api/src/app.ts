@@ -18,7 +18,9 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.register(cors, {
     origin: [webOrigin, "http://localhost:3000", "http://localhost:8080"],
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["content-type", "authorization"]
   });
   app.register(cookie);
   app.register(async (realtime) => {
