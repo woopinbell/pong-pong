@@ -21,6 +21,22 @@ describe("memory repository", () => {
     expect(dashboard.me.rating).toBe(left.rating + 32);
   });
 
+  it("derives the best streak from recent match results", async () => {
+    const repo = createMemoryRepository();
+    await repo.ensureSeedData();
+    const me = await repo.upsertDevUser({ handle: "streaker", displayName: "연승선수" });
+    const rival = await repo.upsertDevUser({ handle: "streak-rival", displayName: "라이벌" });
+    await repo.createMatch({ mode: "queue", winnerId: me.id, loserId: rival.id, scoreLeft: 3, scoreRight: 1 });
+    await repo.createMatch({ mode: "queue", winnerId: rival.id, loserId: me.id, scoreLeft: 3, scoreRight: 2 });
+    await repo.createMatch({ mode: "ai", winnerId: me.id, loserId: null, scoreLeft: 3, scoreRight: 0 });
+    await repo.createMatch({ mode: "queue", winnerId: me.id, loserId: rival.id, scoreLeft: 3, scoreRight: 2 });
+
+    const dashboard = await repo.getDashboard(me.id);
+
+    expect(dashboard.recentMatches.map((match) => match.result)).toEqual(["win", "win", "loss", "win"]);
+    expect(dashboard.bestStreak).toBe(2);
+  });
+
   it("stores lobby and match chat with sender details", async () => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData();
