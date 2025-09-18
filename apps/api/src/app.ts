@@ -93,7 +93,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     const user = await currentUser(repo, request);
     return {
       me: user,
-      onlinePlayers: await repo.listOnlineUsers(),
+      onlinePlayers: hub.onlinePlayers(),
       recentMatches: await repo.listRecentMatches(user?.id),
       chat: await repo.listLobbyChat(),
       stats: hub.liveStats()

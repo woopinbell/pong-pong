@@ -15,6 +15,7 @@ import {
   type GameSnapshot,
   type MatchMode,
   type PlayerSide,
+  type PublicUser,
   type ServerEvent,
   type SessionUser
 } from "@pong-pong/shared";
@@ -199,6 +200,15 @@ export class GameHub {
       activeRooms: this.rooms.size,
       averageWaitSeconds
     };
+  }
+
+  onlinePlayers(): PublicUser[] {
+    const users = new Map<string, PublicUser>();
+    for (const client of this.clients.values()) {
+      const { email: _email, ...user } = client.user;
+      users.set(user.id, { ...user, online: true });
+    }
+    return [...users.values()].sort((left, right) => right.rating - left.rating || left.displayName.localeCompare(right.displayName));
   }
 
   private recordWaitSample(queuedAt: number): void {
