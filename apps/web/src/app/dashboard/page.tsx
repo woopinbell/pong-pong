@@ -40,7 +40,7 @@ export default function DashboardPage() {
         <StatCard icon={Trophy} label="승리" value={String(dashboard.me.wins)} hint="누적 승리" tone="green" />
         <StatCard icon={X} label="패배" value={String(dashboard.me.losses)} hint="복기 대상" tone="red" />
         <StatCard icon={Target} label="승률" value={`${dashboard.winRate}%`} hint="최근 반영" />
-        <StatCard icon={Flame} label="최고 연승" value={String(dashboard.bestStreak)} hint="이번 시즌" tone="amber" />
+        <StatCard icon={Flame} label="최고 연승" value={String(dashboard.bestStreak)} hint="최근 경기" tone="amber" />
       </section>
       <section className="mt-5 grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
         <div className="card p-5">
