@@ -43,6 +43,10 @@ type Room = {
   tournamentMatchId: string | null;
 };
 
+const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
+const BALL_ACCELERATION_PER_TICK = 0.015;
+const MAX_BALL_SPEED = 18;
+
 export class GameHub {
   private readonly clients = new Map<string, Client>();
   private readonly queue: QueueEntry[] = [];
@@ -241,7 +245,7 @@ export class GameHub {
         },
         ball: {
           position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
-          velocity: { x: 7, y: 4 }
+          velocity: { x: INITIAL_BALL_VELOCITY.x, y: INITIAL_BALL_VELOCITY.y }
         },
         players: [
           { id: left.user.id, handle: left.user.handle, displayName: left.user.displayName, side: "left", ready: false, ai: false },
@@ -342,6 +346,7 @@ export class GameHub {
       state.leftScore += 1;
       resetBall(state, 1);
     }
+    accelerateBall(state);
     this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: state });
 
     if (state.leftScore >= WINNING_SCORE || state.rightScore >= WINNING_SCORE || state.tick >= TICK_RATE * 45) {
@@ -427,7 +432,11 @@ function clamp(value: number, min: number, max: number): number {
 
 function resetBall(state: GameSnapshot, xDirection: 1 | -1): void {
   state.ball.position = { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 };
-  state.ball.velocity = { x: 7 * xDirection, y: state.tick % 2 === 0 ? 4 : -4 };
+  const elapsedBoost = Math.min(1.35, 1 + state.tick / (TICK_RATE * 90));
+  state.ball.velocity = {
+    x: INITIAL_BALL_VELOCITY.x * elapsedBoost * xDirection,
+    y: INITIAL_BALL_VELOCITY.y * elapsedBoost * (state.tick % 2 === 0 ? 1 : -1)
+  };
 }
 
 function collidePaddle(state: GameSnapshot, side: PlayerSide, x: number): void {
@@ -440,4 +449,15 @@ function collidePaddle(state: GameSnapshot, side: PlayerSide, x: number): void {
     const offset = (ball.position.y - (paddle.y + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
     ball.velocity.y = offset * 7;
   }
+}
+
+function accelerateBall(state: GameSnapshot): void {
+  const velocity = state.ball.velocity;
+  const currentSpeed = Math.hypot(velocity.x, velocity.y);
+  if (currentSpeed <= 0 || currentSpeed >= MAX_BALL_SPEED) return;
+  const elapsedMinimum = Math.min(MAX_BALL_SPEED, Math.hypot(INITIAL_BALL_VELOCITY.x, INITIAL_BALL_VELOCITY.y) + state.tick * BALL_ACCELERATION_PER_TICK);
+  const nextSpeed = Math.min(MAX_BALL_SPEED, Math.max(currentSpeed + BALL_ACCELERATION_PER_TICK, elapsedMinimum));
+  const scale = nextSpeed / currentSpeed;
+  velocity.x *= scale;
+  velocity.y *= scale;
 }
