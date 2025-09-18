@@ -29,8 +29,9 @@ export default function DashboardPage() {
     );
   }
 
-  const ratingPoints = buildRatingPoints(dashboard.me.rating, dashboard.recentMatches);
-  const chartPoints = toChartPoints(ratingPoints);
+  const hasRatingHistory = dashboard.recentMatches.length > 0;
+  const ratingPoints = hasRatingHistory ? buildRatingPoints(dashboard.me.rating, dashboard.recentMatches) : [];
+  const chartPoints = hasRatingHistory ? toChartPoints(ratingPoints) : "";
 
   return (
     <AppShell>
@@ -46,13 +47,19 @@ export default function DashboardPage() {
         <div className="card p-5">
           <h2 className="text-lg font-black text-ink">점수 흐름</h2>
           <div className="mt-5 h-64 rounded-lg border border-line bg-gradient-to-b from-blue-50 to-white p-5">
-            <svg viewBox="0 0 640 220" className="h-full w-full" role="img" aria-label="점수 상승 그래프">
-              <polyline points={chartPoints} fill="none" stroke="#1768f2" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-              <line x1="0" y1="180" x2="640" y2="180" stroke="#d8e1ef" />
-              <line x1="0" y1="110" x2="640" y2="110" stroke="#d8e1ef" strokeDasharray="8 8" />
-            </svg>
+            {hasRatingHistory ? (
+              <svg viewBox="0 0 640 220" className="h-full w-full" role="img" aria-label="점수 상승 그래프">
+                <polyline points={chartPoints} fill="none" stroke="#1768f2" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+                <line x1="0" y1="180" x2="640" y2="180" stroke="#d8e1ef" />
+                <line x1="0" y1="110" x2="640" y2="110" stroke="#d8e1ef" strokeDasharray="8 8" />
+              </svg>
+            ) : (
+              <div className="flex h-full items-center justify-center text-center text-sm font-bold text-muted">저장된 경기 후 점수 흐름이 표시됩니다.</div>
+            )}
           </div>
-          <p className="mt-3 text-sm font-bold text-muted">현재 점수 {dashboard.me.rating} 기준 최근 경기 변화를 역산해 표시합니다.</p>
+          <p className="mt-3 text-sm font-bold text-muted">
+            {hasRatingHistory ? `현재 점수 ${dashboard.me.rating} 기준 최근 경기 변화를 역산해 표시합니다.` : "아직 저장된 경기가 없어 점수 흐름을 표시하지 않습니다."}
+          </p>
         </div>
         <div className="card p-5">
           <h2 className="text-lg font-black text-ink">최근 경기</h2>
@@ -82,7 +89,7 @@ function buildRatingPoints(currentRating: number, recentMatches: MatchSummary[])
     rating += match.ratingDelta;
     points.push(rating);
   }
-  return points.length === 1 ? [currentRating - 1, currentRating] : points;
+  return points;
 }
 
 function toChartPoints(points: number[]): string {
