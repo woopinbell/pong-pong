@@ -37,6 +37,7 @@ describe("api routes", () => {
     expect(leaderboard.statusCode).toBe(200);
     expect(lobby.statusCode).toBe(200);
     expect(leaderboard.json<{ entries: unknown[] }>().entries.length).toBeGreaterThan(0);
+    expect(lobby.json<{ onlinePlayers: unknown[] }>().onlinePlayers).toEqual([]);
     expect(lobby.json<{ stats: { onlinePlayers: number; queuedPlayers: number; averageWaitSeconds: number | null } }>().stats).toMatchObject({
       onlinePlayers: 0,
       queuedPlayers: 0,
