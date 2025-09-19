@@ -41,6 +41,7 @@ export async function devLogin(handle: string, displayName: string): Promise<Ses
 }
 
 export async function getMe(): Promise<SessionUser | null> {
+  if (!getToken()) return null;
   try {
     return (await apiFetch<{ user: SessionUser }>("/me")).user;
   } catch {
