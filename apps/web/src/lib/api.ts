@@ -11,6 +11,10 @@ export function setToken(token: string): void {
   window.localStorage.setItem("pong-pong-token", token);
 }
 
+export function clearToken(): void {
+  window.localStorage.removeItem("pong-pong-token");
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(init.headers);
@@ -26,6 +30,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     headers
   });
   if (!response.ok) {
+    if (response.status === 401) clearToken();
     throw new Error((await response.text()) || "요청을 처리하지 못했습니다.");
   }
   return response.json() as Promise<T>;
