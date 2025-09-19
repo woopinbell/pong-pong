@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { createMemoryRepository } from "./index";
 
 describe("memory repository", () => {
+  it("seeds rating-banded npc opponents separately from players", async () => {
+    const repo = createMemoryRepository();
+    await repo.ensureSeedData();
+
+    const npcs = await repo.listNpcOpponents();
+
+    expect(npcs.map((npc) => npc.rating)).toEqual([1100, 1200, 1300, 1400]);
+    expect(npcs.every((npc) => npc.isNpc)).toBe(true);
+    expect(npcs.every((npc) => npc.online === false)).toBe(true);
+  });
+
   it("creates sessions and keeps match results in the dashboard", async () => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData();
