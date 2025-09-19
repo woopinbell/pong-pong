@@ -46,6 +46,8 @@ type Room = {
 const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
 const BALL_ACCELERATION_PER_TICK = 0.015;
 const MAX_BALL_SPEED = 18;
+const NPC_QUEUE_FALLBACK_MS = 6000;
+
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
@@ -70,7 +72,7 @@ export class GameHub {
   private async receive(client: Client, payload: string): Promise<void> {
     try {
       const event = parseClientEvent(payload);
-      if (event.type === "queue.join") this.joinQueue(client, event.mode);
+      if (event.type === "queue.join") await this.joinQueue(client, event.mode);
       if (event.type === "queue.leave") this.leaveQueue(client);
       if (event.type === "tournament.join") await this.joinTournamentMatch(client, event.matchId);
       if (event.type === "game.ready") this.markReady(client, event.roomId);
@@ -108,7 +110,7 @@ export class GameHub {
     this.broadcastPresence();
   }
 
-  private joinQueue(client: Client, mode: "queue" | "ai"): void {
+  private async joinQueue(client: Client, mode: "queue" | "ai"): Promise<void> {
     this.leaveQueue(client);
     this.pruneQueue();
     if (mode === "ai") {
@@ -124,6 +126,20 @@ export class GameHub {
     const [opponent] = this.queue.splice(opponentIndex, 1);
     this.recordWaitSample(opponent.queuedAt);
     this.createRoom(opponent.client, client, { ai: false, mode: "queue" });
+  }
+
+  private async findClosestNpc(client: Client): Promise<PublicUser | null> {
+    const npcs = await this.repo.listNpcOpponents();
+    let closest: PublicUser | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const npc of npcs) {
+      const distance = Math.abs(npc.rating - client.user.rating);
+      if (distance < closestDistance) {
+        closest = npc;
+        closestDistance = distance;
+      }
+    }
+    return closest;
   }
 
   private async joinTournamentMatch(client: Client, matchId: string): Promise<void> {
@@ -223,8 +239,9 @@ export class GameHub {
     }
   }
 
-  private createRoom(left: Client, right: Client | null, options: { ai: boolean; mode: MatchMode; tournamentMatchId?: string | null }): string {
+  private createRoom(left: Client, right: Client | null, options: { ai: boolean; mode: MatchMode; tournamentMatchId?: string | null; npc?: PublicUser | null }): string {
     const roomId = randomUUID();
+    const rightPlayer = right?.user ?? options.npc ?? null;
     const room: Room = {
       id: roomId,
       clients: { left, ...(right ? { right } : {}) },
@@ -250,9 +267,9 @@ export class GameHub {
         players: [
           { id: left.user.id, handle: left.user.handle, displayName: left.user.displayName, side: "left", ready: false, ai: false },
           {
-            id: right?.user.id ?? "ai-opponent",
-            handle: right?.user.handle ?? "ai",
-            displayName: right?.user.displayName ?? "연습 AI",
+            id: rightPlayer?.id ?? "ai-opponent",
+            handle: rightPlayer?.handle ?? "ai",
+            displayName: rightPlayer?.displayName ?? "연습 AI",
             side: "right",
             ready: options.ai,
             ai: options.ai
@@ -264,7 +281,7 @@ export class GameHub {
     this.rooms.set(roomId, room);
     left.roomId = roomId;
     if (right) right.roomId = roomId;
-    this.send(left, { type: "queue.matched", roomId, side: "left", opponent: right?.user.displayName ?? "연습 AI" });
+    this.send(left, { type: "queue.matched", roomId, side: "left", opponent: rightPlayer?.displayName ?? "연습 AI" });
     if (right) this.send(right, { type: "queue.matched", roomId, side: "right", opponent: left.user.displayName });
     this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
     this.broadcastPresence();
@@ -358,12 +375,14 @@ export class GameHub {
     if (room.timer) clearInterval(room.timer);
     room.timer = null;
     room.snapshot.phase = "finished";
-    const winner = winnerSide === "left" ? room.clients.left : room.clients.right;
-    const loser = winnerSide === "left" ? room.clients.right : room.clients.left;
+    const leftUser = room.clients.left?.user ?? null;
+    const rightUser = room.clients.right?.user ?? room.snapshot.players.find((player) => player.side === "right" && player.ai) ?? null;
+    const winner = winnerSide === "left" ? leftUser : rightUser;
+    const loser = winnerSide === "left" ? rightUser : leftUser;
     const matchId = await this.repo.createMatch({
       mode: room.mode,
-      winnerId: winner?.user.id ?? null,
-      loserId: loser?.user.id ?? null,
+      winnerId: winner?.id ?? null,
+      loserId: loser?.id ?? null,
       scoreLeft: room.snapshot.leftScore,
       scoreRight: room.snapshot.rightScore
     });
@@ -381,7 +400,7 @@ export class GameHub {
         tournamentMatchId: room.tournamentMatchId,
         roomId: room.id,
         matchId,
-        winnerId: winner?.user.id ?? null,
+        winnerId: winner?.id ?? null,
         scoreLeft: room.snapshot.leftScore,
         scoreRight: room.snapshot.rightScore
       });
