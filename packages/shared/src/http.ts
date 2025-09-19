@@ -15,6 +15,7 @@ export interface PublicUser {
   wins: number;
   losses: number;
   online: boolean;
+  isNpc: boolean;
 }
 
 export interface SessionUser extends PublicUser {

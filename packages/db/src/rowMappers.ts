@@ -12,7 +12,8 @@ export function toPublicUser(row: UserProjectionRow, online = false): PublicUser
     rating: Number(row.rating),
     wins: Number(row.wins),
     losses: Number(row.losses),
-    online
+    online,
+    isNpc: Boolean(row.is_npc)
   };
 }
 
@@ -53,7 +54,8 @@ export function toChatMessage(row: ChatMessageWithSenderRow): ChatMessage {
       status: row.status,
       rating: row.rating,
       wins: row.wins,
-      losses: row.losses
+      losses: row.losses,
+      is_npc: row.is_npc
     }),
     body: row.body,
     createdAt: row.created_at.toISOString()

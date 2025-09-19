@@ -170,7 +170,8 @@ describe("encodeServerEvent", () => {
           rating: 1000,
           wins: 1,
           losses: 0,
-          online: true
+          online: true,
+          isNpc: false
         },
         body: "hello",
         createdAt: "2026-07-23T00:00:00.000Z"

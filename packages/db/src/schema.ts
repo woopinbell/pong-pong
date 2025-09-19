@@ -12,6 +12,7 @@ export interface UserTable {
   rating: Generated<number>;
   wins: Generated<number>;
   losses: Generated<number>;
+  is_npc: Generated<boolean>;
   created_at: Generated<Date>;
   banned_at: Date | null;
 }
@@ -137,6 +138,7 @@ export interface ChatMessageWithSenderRow extends ChatMessageRow {
   rating: number;
   wins: number;
   losses: number;
+  is_npc: boolean;
 }
 
 export type TournamentRow = Selectable<TournamentTable>;
@@ -152,6 +154,7 @@ export interface TournamentWithCreatorRow extends TournamentRow {
   rating: number;
   wins: number;
   losses: number;
+  is_npc: boolean;
 }
 export type UserProjectionRow = Pick<
   UserRow,
@@ -165,4 +168,5 @@ export type UserProjectionRow = Pick<
   | "rating"
   | "wins"
   | "losses"
+  | "is_npc"
 >;

@@ -241,7 +241,7 @@ class PostgresRepository implements AppRepository {
 
   async listLobbyChat(): Promise<ChatMessage[]> {
     const result = await sql<ChatMessageWithSenderRow>`
-      select c.*, u.id as user_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status, u.rating, u.wins, u.losses
+      select c.*, u.id as user_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status, u.rating, u.wins, u.losses, u.is_npc
       from chat_messages c join users u on u.id = c.sender_id where c.scope = 'lobby'
       order by c.created_at desc limit 20
     `.execute(this.db);
@@ -257,7 +257,7 @@ class PostgresRepository implements AppRepository {
   }
 
   async listTournaments(): Promise<TournamentSummary[]> {
-    const result = await sql<TournamentWithCreatorRow>`select t.*, u.id as creator_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status as user_status, u.rating, u.wins, u.losses from tournaments t join users u on u.id = t.created_by order by t.created_at desc limit 10`.execute(this.db);
+    const result = await sql<TournamentWithCreatorRow>`select t.*, u.id as creator_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status as user_status, u.rating, u.wins, u.losses, u.is_npc from tournaments t join users u on u.id = t.created_by order by t.created_at desc limit 10`.execute(this.db);
     const summaries: TournamentSummary[] = [];
     for (const row of result.rows) summaries.push(await this.tournamentFromRow(row));
     return summaries;
@@ -415,7 +415,8 @@ class MemoryRepository implements AppRepository {
       status: "active",
       rating: handle === "admin" ? 1680 : 1200,
       wins: 0,
-      losses: 0
+      losses: 0,
+      is_npc: false
     };
     user.display_name = input.displayName || user.display_name;
     this.users.set(user.id, user);

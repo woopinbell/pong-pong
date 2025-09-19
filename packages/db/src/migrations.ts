@@ -12,9 +12,12 @@ create table if not exists users (
   rating integer not null default 1200,
   wins integer not null default 0,
   losses integer not null default 0,
+  is_npc boolean not null default false,
   created_at timestamptz not null default now(),
   banned_at timestamptz
 );
+
+alter table users add column if not exists is_npc boolean not null default false;
 
 create table if not exists sessions (
   token text primary key,
