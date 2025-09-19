@@ -14,6 +14,12 @@ rightSocket.addEventListener("message", (event) => events.push({ side: "right", 
 try {
   await opened(leftSocket);
   await opened(rightSocket);
+  const lobby = await fetchJson(`${baseUrl}/lobby`);
+  const onlineHandles = lobby.onlinePlayers.map((player) => player.handle);
+  if (!onlineHandles.includes("left-smoke") || !onlineHandles.includes("right-smoke")) {
+    throw new Error(`online lobby players missing connected sockets: ${onlineHandles.join(",")}`);
+  }
+
   leftSocket.send(JSON.stringify({ type: "chat.send", scope: "lobby", roomId: null, body: "로비 실시간 확인" }));
   await waitFor(() => events.find((item) => item.event.type === "chat.message" && item.event.message.scope === "lobby"));
 
@@ -27,7 +33,15 @@ try {
 
   leftSocket.send(JSON.stringify({ type: "game.ready", roomId }));
   rightSocket.send(JSON.stringify({ type: "game.ready", roomId }));
-  await waitFor(() => events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "playing"));
+  const firstPlaying = await waitFor(() => events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "playing"));
+  const initialSpeed = speedOf(firstPlaying.event.snapshot.ball.velocity);
+  if (initialSpeed < 11) throw new Error(`ball starts too slowly: ${initialSpeed}`);
+  const accelerated = await waitFor(() =>
+    events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "playing" && item.event.snapshot.tick >= firstPlaying.event.snapshot.tick + 20)
+  );
+  const acceleratedSpeed = speedOf(accelerated.event.snapshot.ball.velocity);
+  if (acceleratedSpeed <= initialSpeed) throw new Error(`ball did not accelerate: ${initialSpeed} -> ${acceleratedSpeed}`);
+
   leftSocket.send(JSON.stringify({ type: "game.pause", roomId }));
   await waitFor(() => events.find((item) => item.event.type === "game.snapshot" && item.event.snapshot.phase === "paused"));
   leftSocket.send(JSON.stringify({ type: "game.resume", roomId }));
@@ -49,6 +63,12 @@ async function login(handle, displayName) {
     body: JSON.stringify({ handle, displayName })
   });
   if (!response.ok) throw new Error(`login failed: ${response.status}`);
+  return response.json();
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`request failed: ${response.status}`);
   return response.json();
 }
 
@@ -79,4 +99,8 @@ function waitFor(predicate) {
       }
     }, 50);
   });
+}
+
+function speedOf(velocity) {
+  return Math.hypot(velocity.x, velocity.y);
 }
