@@ -43,6 +43,7 @@ type Room = {
   mode: MatchMode;
   tournamentMatchId: string | null;
   npcUser: PublicUser | null;
+  aiTargetY: number;
 };
 
 const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
@@ -50,6 +51,13 @@ const BALL_ACCELERATION_PER_TICK = 0.015;
 const MAX_BALL_SPEED = 18;
 const NPC_QUEUE_FALLBACK_MS = 6000;
 
+type AiProfile = {
+  reactionTicks: number;
+  predictionNoise: number;
+  mistakeChance: number;
+  paddleSpeedMultiplier: number;
+  deadZone: number;
+};
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
@@ -276,6 +284,7 @@ export class GameHub {
       mode: options.mode,
       tournamentMatchId: options.tournamentMatchId ?? null,
       npcUser,
+      aiTargetY: GAME_HEIGHT / 2,
       snapshot: {
         roomId,
         phase: "waiting",
@@ -368,10 +377,10 @@ export class GameHub {
     const speed = 13;
     state.paddles.left.y = clamp(state.paddles.left.y + state.paddles.left.dy * speed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
     if (room.ai) {
-      const center = state.paddles.right.y + PADDLE_HEIGHT / 2;
-      state.paddles.right.dy = state.ball.position.y > center + 14 ? 1 : state.ball.position.y < center - 14 ? -1 : 0;
+      updateAiPaddleIntent(room);
     }
-    state.paddles.right.y = clamp(state.paddles.right.y + state.paddles.right.dy * speed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
+    const rightSpeed = room.ai ? speed * aiProfileFor(room.npcUser?.rating ?? 1200).paddleSpeedMultiplier : speed;
+    state.paddles.right.y = clamp(state.paddles.right.y + state.paddles.right.dy * rightSpeed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
 
     state.ball.position.x += state.ball.velocity.x;
     state.ball.position.y += state.ball.velocity.y;
@@ -480,6 +489,64 @@ function clearQueueTimer(entry: QueueEntry): void {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function updateAiPaddleIntent(room: Room): void {
+  const state = room.snapshot;
+  const profile = aiProfileFor(room.npcUser?.rating ?? 1200);
+  if (state.tick % profile.reactionTicks === 0) {
+    const targetBase = state.ball.velocity.x > 0 ? predictedBallY(state) : GAME_HEIGHT / 2;
+    const noise = signedDeterministic(room.id, state.tick, 1) * profile.predictionNoise;
+    const mistake = deterministicUnit(room.id, state.tick, 2) < profile.mistakeChance;
+    const mistakeOffset = mistake ? signedDeterministic(room.id, state.tick, 3) * 110 : 0;
+    room.aiTargetY = clamp(targetBase + noise + mistakeOffset, 16 + PADDLE_HEIGHT / 2, GAME_HEIGHT - 16 - PADDLE_HEIGHT / 2);
+  }
+  const center = state.paddles.right.y + PADDLE_HEIGHT / 2;
+  state.paddles.right.dy = room.aiTargetY > center + profile.deadZone ? 1 : room.aiTargetY < center - profile.deadZone ? -1 : 0;
+}
+
+function aiProfileFor(rating: number): AiProfile {
+  if (rating >= 1400) {
+    return { reactionTicks: 3, predictionNoise: 20, mistakeChance: 0.04, paddleSpeedMultiplier: 1.05, deadZone: 10 };
+  }
+  if (rating >= 1300) {
+    return { reactionTicks: 4, predictionNoise: 34, mistakeChance: 0.08, paddleSpeedMultiplier: 0.96, deadZone: 14 };
+  }
+  if (rating >= 1200) {
+    return { reactionTicks: 6, predictionNoise: 54, mistakeChance: 0.12, paddleSpeedMultiplier: 0.86, deadZone: 18 };
+  }
+  return { reactionTicks: 8, predictionNoise: 78, mistakeChance: 0.18, paddleSpeedMultiplier: 0.74, deadZone: 24 };
+}
+
+function predictedBallY(state: GameSnapshot): number {
+  if (state.ball.velocity.x <= 0) return state.ball.position.y;
+  const distance = GAME_WIDTH - 32 - state.ball.position.x;
+  const ticks = distance / Math.max(1, state.ball.velocity.x);
+  let y = state.ball.position.y + state.ball.velocity.y * ticks;
+  const min = BALL_RADIUS;
+  const max = GAME_HEIGHT - BALL_RADIUS;
+  while (y < min || y > max) {
+    if (y < min) y = min + (min - y);
+    if (y > max) y = max - (y - max);
+  }
+  return y;
+}
+
+function deterministicUnit(seed: string, tick: number, salt: number): number {
+  const value = Math.sin(hashString(seed) * 0.001 + tick * 12.9898 + salt * 78.233) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function signedDeterministic(seed: string, tick: number, salt: number): number {
+  return deterministicUnit(seed, tick, salt) * 2 - 1;
+}
+
+function hashString(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
 }
 
 function resetBall(state: GameSnapshot, xDirection: 1 | -1): void {
