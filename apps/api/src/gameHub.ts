@@ -30,6 +30,7 @@ type Client = {
 type QueueEntry = {
   client: Client;
   queuedAt: number;
+  npcFallbackTimer: NodeJS.Timeout | null;
 };
 
 type Room = {
@@ -41,6 +42,7 @@ type Room = {
   timer: NodeJS.Timeout | null;
   mode: MatchMode;
   tournamentMatchId: string | null;
+  npcUser: PublicUser | null;
 };
 
 const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
@@ -119,13 +121,31 @@ export class GameHub {
     }
     const opponentIndex = this.findClosestQueuedOpponent(client);
     if (opponentIndex < 0) {
-      this.queue.push({ client, queuedAt: Date.now() });
+      const entry: QueueEntry = { client, queuedAt: Date.now(), npcFallbackTimer: null };
+      entry.npcFallbackTimer = setTimeout(() => {
+        this.matchQueuedClientWithNpc(entry).catch((error) => {
+          this.send(client, { type: "error", message: error instanceof Error ? error.message : "AI 상대를 찾지 못했습니다." });
+        });
+      }, NPC_QUEUE_FALLBACK_MS);
+      this.queue.push(entry);
       this.broadcastPresence();
       return;
     }
     const [opponent] = this.queue.splice(opponentIndex, 1);
+    clearQueueTimer(opponent);
     this.recordWaitSample(opponent.queuedAt);
     this.createRoom(opponent.client, client, { ai: false, mode: "queue" });
+  }
+
+  private async matchQueuedClientWithNpc(entry: QueueEntry): Promise<void> {
+    const index = this.queue.findIndex((queued) => queued.client.id === entry.client.id);
+    if (index < 0 || entry.client.socket.readyState !== WebSocket.OPEN || entry.client.roomId) return;
+    const npc = await this.findClosestNpc(entry.client);
+    if (!npc) return;
+    const [queued] = this.queue.splice(index, 1);
+    clearQueueTimer(queued);
+    this.recordWaitSample(queued.queuedAt);
+    this.createRoom(queued.client, null, { ai: true, mode: "queue", npc });
   }
 
   private async findClosestNpc(client: Client): Promise<PublicUser | null> {
@@ -189,7 +209,10 @@ export class GameHub {
 
   private leaveQueue(client: Client): void {
     const index = this.queue.findIndex((queued) => queued.client.id === client.id);
-    if (index >= 0) this.queue.splice(index, 1);
+    if (index >= 0) {
+      const [entry] = this.queue.splice(index, 1);
+      clearQueueTimer(entry);
+    }
   }
 
   private leaveTournamentWaiters(client: Client): void {
@@ -203,7 +226,8 @@ export class GameHub {
   private pruneQueue(): void {
     for (let index = this.queue.length - 1; index >= 0; index -= 1) {
       if (this.queue[index].client.socket.readyState !== WebSocket.OPEN) {
-        this.queue.splice(index, 1);
+        const [entry] = this.queue.splice(index, 1);
+        clearQueueTimer(entry);
       }
     }
   }
@@ -241,7 +265,8 @@ export class GameHub {
 
   private createRoom(left: Client, right: Client | null, options: { ai: boolean; mode: MatchMode; tournamentMatchId?: string | null; npc?: PublicUser | null }): string {
     const roomId = randomUUID();
-    const rightPlayer = right?.user ?? options.npc ?? null;
+    const npcUser = options.npc ?? null;
+    const rightPlayer = right?.user ?? npcUser;
     const room: Room = {
       id: roomId,
       clients: { left, ...(right ? { right } : {}) },
@@ -250,6 +275,7 @@ export class GameHub {
       timer: null,
       mode: options.mode,
       tournamentMatchId: options.tournamentMatchId ?? null,
+      npcUser,
       snapshot: {
         roomId,
         phase: "waiting",
@@ -376,7 +402,7 @@ export class GameHub {
     room.timer = null;
     room.snapshot.phase = "finished";
     const leftUser = room.clients.left?.user ?? null;
-    const rightUser = room.clients.right?.user ?? room.snapshot.players.find((player) => player.side === "right" && player.ai) ?? null;
+    const rightUser = room.clients.right?.user ?? room.npcUser ?? null;
     const winner = winnerSide === "left" ? leftUser : rightUser;
     const loser = winnerSide === "left" ? rightUser : leftUser;
     const matchId = await this.repo.createMatch({
@@ -443,6 +469,13 @@ function sideFor(room: Room, client: Client): PlayerSide | null {
   if (room.clients.left?.id === client.id) return "left";
   if (room.clients.right?.id === client.id) return "right";
   return null;
+}
+
+function clearQueueTimer(entry: QueueEntry): void {
+  if (entry.npcFallbackTimer) {
+    clearTimeout(entry.npcFallbackTimer);
+    entry.npcFallbackTimer = null;
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
