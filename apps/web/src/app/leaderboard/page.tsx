@@ -35,7 +35,10 @@ export default function LeaderboardPage() {
           <div key={entry.user.id} className="grid grid-cols-[70px_1fr_120px_120px] items-center border-b border-line px-5 py-4 last:border-b-0">
             <span className="text-lg font-black text-blue-700">#{entry.rank}</span>
             <div>
-              <p className="font-black text-ink">{entry.user.displayName}</p>
+              <p className="flex items-center gap-2 font-black text-ink">
+                {entry.user.displayName}
+                {entry.user.isNpc ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-black text-amber-700">AI</span> : null}
+              </p>
               <p className="text-sm font-semibold text-muted">누적 {entry.user.wins}승</p>
             </div>
             <span className="text-right font-black text-green-600">{entry.user.rating}</span>

@@ -24,7 +24,8 @@ export default function PlayPage() {
   const canChat = Boolean(roomId && phase !== "finished" && chatInput.trim());
   const canPause = Boolean(roomId && phase === "playing");
   const canResume = Boolean(roomId && phase === "paused");
-  const opponentName = snapshot?.players.find((player) => player.side === "right")?.displayName ?? "대기 중";
+  const opponent = snapshot?.players.find((player) => player.side === "right");
+  const opponentName = opponent?.displayName ?? "대기 중";
   const autoStartedRef = useRef(false);
 
   useEffect(() => () => closeCurrentSocket(), []);
@@ -42,6 +43,11 @@ export default function PlayPage() {
     if (mode === "ai") {
       autoStartedRef.current = true;
       connect("ai");
+      return;
+    }
+    if (mode === "queue") {
+      autoStartedRef.current = true;
+      connect("queue");
     }
   }, []);
 
@@ -233,7 +239,7 @@ export default function PlayPage() {
               <Users size={20} /> 상대 정보
             </h2>
             <p className="mt-4 text-2xl font-black text-ink">{opponentName}</p>
-            <p className="mt-2 text-sm font-semibold text-muted">서버 경기 장면 기준으로 상태가 갱신됩니다.</p>
+            <p className="mt-2 text-sm font-semibold text-muted">{opponent?.ai ? "AI 상대입니다. 서버 경기 장면 기준으로 상태가 갱신됩니다." : "서버 경기 장면 기준으로 상태가 갱신됩니다."}</p>
           </div>
           <div className="card p-5">
             <h2 className="flex items-center gap-2 text-lg font-black text-ink">

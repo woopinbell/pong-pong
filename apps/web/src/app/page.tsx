@@ -168,11 +168,11 @@ export default function HomePage() {
         </div>
       </section>
       <section className="mt-5 grid gap-4 md:grid-cols-2">
-        <a className="focus-ring card block border-2 border-blue-600 bg-white p-6 text-ink transition hover:-translate-y-0.5 hover:shadow-xl" href="/play">
+        <a className="focus-ring card block border-2 border-blue-600 bg-white p-6 text-ink transition hover:-translate-y-0.5 hover:shadow-xl" href="/play?mode=queue">
           <Users size={28} />
           <h2 className="mt-3 text-xl font-black">매칭 큐 참가</h2>
-          <p className="mt-2 text-sm font-semibold text-muted">비슷한 점수의 상대를 찾습니다.</p>
-          <span className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">경기장 열기</span>
+          <p className="mt-2 text-sm font-semibold text-muted">비슷한 점수의 상대를 찾고, 없으면 AI 상대를 배정합니다.</p>
+          <span className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">큐 참가</span>
         </a>
         <a className="focus-ring card block border-2 border-green-600 bg-white p-6 text-ink transition hover:-translate-y-0.5 hover:shadow-xl" href="/play?mode=ai">
           <Bot size={28} />

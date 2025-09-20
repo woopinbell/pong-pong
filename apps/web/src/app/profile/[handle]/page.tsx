@@ -63,13 +63,16 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
           <div className="flex items-center gap-5">
             <div className="grid h-28 w-28 place-items-center rounded-full bg-blue-100 text-3xl font-black text-blue-700">{user.displayName.slice(0, 1)}</div>
             <div>
-              <h1 className="text-3xl font-black text-ink">{user.displayName}</h1>
+              <h1 className="flex flex-wrap items-center gap-3 text-3xl font-black text-ink">
+                {user.displayName}
+                {user.isNpc ? <span className="rounded-full bg-amber-50 px-3 py-1 text-sm font-black text-amber-700">AI 상대</span> : null}
+              </h1>
               <p className="mt-1 text-sm font-semibold text-muted">선수 번호 {handle.length}</p>
               <p className="mt-3 text-lg font-black text-green-600">점수 {user.rating}</p>
             </div>
           </div>
           <div className="flex gap-3">
-            <button className="focus-ring rounded-lg border border-line px-4 py-3 text-sm font-black text-ink" onClick={addFriend}>
+            <button className="focus-ring rounded-lg border border-line px-4 py-3 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted" onClick={addFriend} disabled={user.isNpc}>
               <UserPlus size={18} className="mr-2 inline" />
               친구 추가
             </button>
