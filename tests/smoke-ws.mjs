@@ -14,11 +14,11 @@ rightSocket.addEventListener("message", (event) => events.push({ side: "right", 
 try {
   await opened(leftSocket);
   await opened(rightSocket);
-  const lobby = await fetchJson(`${baseUrl}/lobby`);
-  const onlineHandles = lobby.onlinePlayers.map((player) => player.handle);
-  if (!onlineHandles.includes("left-smoke") || !onlineHandles.includes("right-smoke")) {
-    throw new Error(`online lobby players missing connected sockets: ${onlineHandles.join(",")}`);
-  }
+  await waitFor(async () => {
+    const lobby = await fetchJson(`${baseUrl}/lobby`);
+    const onlineHandles = lobby.onlinePlayers.map((player) => player.handle);
+    return onlineHandles.includes("left-smoke") && onlineHandles.includes("right-smoke") ? lobby : null;
+  });
 
   leftSocket.send(JSON.stringify({ type: "chat.send", scope: "lobby", roomId: null, body: "로비 실시간 확인" }));
   await waitFor(() => events.find((item) => item.event.type === "chat.message" && item.event.message.scope === "lobby"));
@@ -102,23 +102,20 @@ function opened(socket) {
   });
 }
 
-function waitFor(predicate, timeout = 10_000) {
+async function waitFor(predicate, timeout = 10_000) {
   const startedAt = Date.now();
-  return new Promise((resolve, reject) => {
-    const timer = setInterval(() => {
-      const value = predicate();
-      if (value) {
-        clearInterval(timer);
-        resolve(value);
-      }
-      if (Date.now() - startedAt > timeout) {
-        clearInterval(timer);
-        reject(new Error("timed out"));
-      }
-    }, 50);
-  });
+  while (Date.now() - startedAt <= timeout) {
+    const value = await predicate();
+    if (value) return value;
+    await delay(50);
+  }
+  throw new Error("timed out");
 }
 
 function speedOf(velocity) {
   return Math.hypot(velocity.x, velocity.y);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
