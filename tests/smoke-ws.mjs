@@ -50,11 +50,29 @@ try {
   leftSocket.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body: "준비됐습니다." }));
   await waitFor(() => events.find((item) => item.event.type === "chat.message"));
 
-  console.log("websocket smoke ok");
 } finally {
   leftSocket.close();
   rightSocket.close();
 }
+
+const solo = await login("solo-smoke", "혼자큐");
+const soloSocket = connect(solo.token);
+const soloEvents = [];
+soloSocket.addEventListener("message", (event) => soloEvents.push(JSON.parse(event.data)));
+
+try {
+  await opened(soloSocket);
+  soloSocket.send(JSON.stringify({ type: "queue.join", mode: "queue" }));
+  const matched = await waitFor(() => soloEvents.find((event) => event.type === "queue.matched" && event.opponent.includes("AI")), 8_000);
+  soloSocket.send(JSON.stringify({ type: "game.ready", roomId: matched.roomId }));
+  const npcSnapshot = await waitFor(() => soloEvents.find((event) => event.type === "game.snapshot" && event.snapshot.players.some((player) => player.ai && player.handle.startsWith("npc-"))));
+  const npcPlayer = npcSnapshot.snapshot.players.find((player) => player.ai);
+  if (!npcPlayer) throw new Error("npc snapshot missing ai player");
+} finally {
+  soloSocket.close();
+}
+
+console.log("websocket smoke ok");
 
 async function login(handle, displayName) {
   const response = await fetch(`${baseUrl}/auth/dev-login`, {
@@ -84,7 +102,7 @@ function opened(socket) {
   });
 }
 
-function waitFor(predicate) {
+function waitFor(predicate, timeout = 10_000) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     const timer = setInterval(() => {
@@ -93,7 +111,7 @@ function waitFor(predicate) {
         clearInterval(timer);
         resolve(value);
       }
-      if (Date.now() - startedAt > 10_000) {
+      if (Date.now() - startedAt > timeout) {
         clearInterval(timer);
         reject(new Error("timed out"));
       }
