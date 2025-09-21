@@ -42,14 +42,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {nav.map((item) => {
               const Icon = item.icon;
               const active = pathname === item.href || Boolean(item.matchPrefix && pathname.startsWith(item.matchPrefix)) || (item.href !== "/" && pathname.startsWith(item.href));
+              const className = `focus-ring flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-bold transition ${
+                active ? "bg-blue-50 text-blue-700" : "text-muted hover:bg-slate-50 hover:text-ink"
+              }`;
+              if (item.id === "profile" && !me) {
+                return (
+                  <span key={item.id} aria-disabled="true" className={className}>
+                    <Icon size={19} />
+                    {item.label}
+                  </span>
+                );
+              }
               return (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  className={`focus-ring flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-bold transition ${
-                    active ? "bg-blue-50 text-blue-700" : "text-muted hover:bg-slate-50 hover:text-ink"
-                  }`}
-                >
+                <Link key={item.id} href={item.href} className={className}>
                   <Icon size={19} />
                   {item.label}
                 </Link>
