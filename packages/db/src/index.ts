@@ -52,6 +52,7 @@ export interface AppRepository {
   upsertDevUser(input: DevLoginInput): Promise<SessionUser>;
   createSession(userId: string): Promise<string>;
   getSessionUser(token: string | undefined): Promise<SessionUser | null>;
+  deleteSession(token: string | undefined): Promise<void>;
   getUserById(id: string): Promise<PublicUser | null>;
   getUserByHandle(handle: string): Promise<PublicUser | null>;
   updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser>;
@@ -163,6 +164,11 @@ class PostgresRepository implements AppRepository {
     `.execute(this.db);
     const user = result.rows[0];
     return user ? toSessionUser(user, true) : null;
+  }
+
+  async deleteSession(token: string | undefined): Promise<void> {
+    if (!token) return;
+    await sql`delete from sessions where token = ${token}`.execute(this.db);
   }
 
   async getUserById(id: string): Promise<PublicUser | null> {
@@ -469,6 +475,10 @@ class MemoryRepository implements AppRepository {
     const userId = token ? this.sessions.get(token) : undefined;
     const user = userId ? this.users.get(userId) : undefined;
     return user ? toSessionUser(user, true) : null;
+  }
+
+  async deleteSession(token: string | undefined): Promise<void> {
+    if (token) this.sessions.delete(token);
   }
 
   async getUserById(id: string): Promise<PublicUser | null> {

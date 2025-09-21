@@ -65,7 +65,8 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     return { user, token };
   });
 
-  app.post("/auth/logout", async (_request, reply) => {
+  app.post("/auth/logout", async (request, reply) => {
+    await repo.deleteSession(readSessionToken(request));
     reply.clearCookie("pp_session", { path: "/" });
     return { ok: true };
   });
@@ -236,12 +237,16 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   return app;
 }
 
-async function currentUser(repo: AppRepository, request: FastifyRequest): Promise<SessionUser | null> {
+function readSessionToken(request: FastifyRequest): string | undefined {
   const cookieToken = request.cookies?.pp_session;
   const header = request.headers.authorization?.replace(/^Bearer\s+/i, "");
   const queryToken = (request.query as { session?: string } | undefined)?.session;
   const rawQueryToken = new URL(request.raw.url ?? "/", "http://localhost").searchParams.get("session") ?? undefined;
-  return repo.getSessionUser(cookieToken ?? header ?? queryToken ?? rawQueryToken);
+  return cookieToken ?? header ?? queryToken ?? rawQueryToken;
+}
+
+async function currentUser(repo: AppRepository, request: FastifyRequest): Promise<SessionUser | null> {
+  return repo.getSessionUser(readSessionToken(request));
 }
 
 function unauthorized(reply: FastifyReply) {
