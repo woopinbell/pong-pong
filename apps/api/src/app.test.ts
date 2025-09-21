@@ -68,4 +68,15 @@ describe("api routes", () => {
     });
     expect(lobby.json<{ chat: Array<{ body: string }> }>().chat.some((message) => message.body === "로비 채팅 저장 확인")).toBe(true);
   });
+
+  it("invalidates the server session on logout", async () => {
+    const login = await app.inject({ method: "POST", url: "/auth/dev-login", payload: { handle: "logout-tester", displayName: "로그아웃" } });
+    const token = login.json<{ token: string }>().token;
+    const before = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${token}` } });
+    expect(before.statusCode).toBe(200);
+    const logout = await app.inject({ method: "POST", url: "/auth/logout", headers: { authorization: `Bearer ${token}` } });
+    expect(logout.statusCode).toBe(200);
+    const after = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${token}` } });
+    expect(after.statusCode).toBe(401);
+  });
 });
