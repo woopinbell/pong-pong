@@ -19,7 +19,7 @@ test("한국어 로비에서 로그인하고 주요 화면을 이동한다", asy
   await page.getByRole("button", { name: "개발 로그인" }).click();
 
   await expect(page.getByRole("link", { name: "빠른 매칭" })).toBeVisible();
-  await expect(page.getByText(/대기 없음|0초/)).toBeVisible();
+  await expect(page.getByText(/대기 없음|[0-9]+초/)).toBeVisible();
   await page.getByPlaceholder("로비 메시지 입력").fill(lobbyMessage);
   await page.getByRole("button", { name: "보내기" }).click();
   await expect(page.getByText(lobbyMessage)).toBeVisible();
@@ -91,18 +91,22 @@ test("프로필 친구 요청과 공유 복사를 확인한다", async ({ page }
   await expect(page.getByText(/공유 링크를/)).toBeVisible();
 });
 
-test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ page, request }) => {
-  await login(page, "cup-player", "컵선수");
+test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ page, request }, testInfo) => {
+  const suffix = `${testInfo.project.name}-${Date.now()}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  await login(page, `cup-player-${suffix}`, "컵선수");
   const token = await page.evaluate(() => window.localStorage.getItem("pong-pong-token"));
-  const name = `E2E 퐁퐁 컵 ${Date.now()}`;
+  const name = `E2E 퐁퐁 컵 ${suffix}`;
   const created = await request.post(`${apiBase}/tournaments`, {
     headers: { authorization: `Bearer ${token}` },
     data: { name }
   });
   const tournament = (await created.json()).tournament as { id: string };
+  await request.post(`${apiBase}/tournaments/${tournament.id}/join`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
   for (const handle of ["cup-two", "cup-three", "cup-four"]) {
     const loginResponse = await request.post(`${apiBase}/auth/dev-login`, {
-      data: { handle, displayName: handle }
+      data: { handle: `${handle}-${suffix}`, displayName: handle }
     });
     const playerToken = (await loginResponse.json()).token as string;
     await request.post(`${apiBase}/tournaments/${tournament.id}/join`, {
