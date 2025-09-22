@@ -4,7 +4,9 @@ import { readEnv } from "./env";
 
 const env = readEnv();
 const repo = env.databaseUrl ? createPostgresRepository(env.databaseUrl) : createMemoryRepository();
-await repo.ensureSeedData();
+if (!env.databaseUrl) {
+  await repo.ensureSeedData();
+}
 
 const app = buildApp({ repo, webOrigin: env.webOrigin });
 app.addHook("onClose", async () => {
