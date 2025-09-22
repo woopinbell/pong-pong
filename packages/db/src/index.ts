@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
 import type { AdminActionSummary, ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
-import { initialMigrationSql } from "./migrations";
 import { toAdminActionSummary, toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentMatchRecord, toTournamentMatchSummary, toTournamentSummary } from "./rowMappers";
 import type { AdminActionRow, ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentMatchRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
 
@@ -100,7 +99,6 @@ class PostgresRepository implements AppRepository {
   }
 
   async ensureSeedData(): Promise<void> {
-    await sql.raw(initialMigrationSql).execute(this.db);
     const players: DevLoginInput[] = [
       { handle: "spin-doctor", displayName: "스핀닥터", email: "spin@pong.local" },
       { handle: "paddle-pro", displayName: "패들프로", email: "paddle@pong.local" },
