@@ -13,6 +13,8 @@ export interface DevLoginInput {
   email?: string | null;
 }
 
+export type SeedProfile = "development" | "demo";
+
 type NpcSeed = { handle: string; displayName: string; rating: number; avatarKey: string };
 const NPC_PLAYERS: NpcSeed[] = [
   { handle: "npc-rally-1100", displayName: "AI 랠리 1100", rating: 1100, avatarKey: "green" },
@@ -47,7 +49,7 @@ export interface TournamentMatchRecord {
 
 export interface AppRepository {
   close(): Promise<void>;
-  ensureSeedData(): Promise<void>;
+  ensureSeedData(profile?: SeedProfile): Promise<void>;
   upsertDevUser(input: DevLoginInput): Promise<SessionUser>;
   createSession(userId: string): Promise<string>;
   getSessionUser(token: string | undefined): Promise<SessionUser | null>;
@@ -98,23 +100,27 @@ class PostgresRepository implements AppRepository {
     await this.pool.end().catch(() => undefined);
   }
 
-  async ensureSeedData(): Promise<void> {
-    const players: DevLoginInput[] = [
-      { handle: "spin-doctor", displayName: "스핀닥터", email: "spin@pong.local" },
-      { handle: "paddle-pro", displayName: "패들프로", email: "paddle@pong.local" },
-      { handle: "net-ninja", displayName: "네트닌자", email: "net@pong.local" },
-      { handle: "top-spin", displayName: "탑스핀", email: "top@pong.local" },
-      { handle: "admin", displayName: "운영자", email: "admin@pong.local" }
-    ];
-    for (const player of players) {
-      await this.upsertDevUser(player);
+  async ensureSeedData(profile: SeedProfile = "development"): Promise<void> {
+    if (profile === "development") {
+      const players: DevLoginInput[] = [
+        { handle: "spin-doctor", displayName: "스핀닥터", email: "spin@pong.local" },
+        { handle: "paddle-pro", displayName: "패들프로", email: "paddle@pong.local" },
+        { handle: "net-ninja", displayName: "네트닌자", email: "net@pong.local" },
+        { handle: "top-spin", displayName: "탑스핀", email: "top@pong.local" },
+        { handle: "admin", displayName: "운영자", email: "admin@pong.local" }
+      ];
+      for (const player of players) {
+        await this.upsertDevUser(player);
+      }
     }
     for (const npc of NPC_PLAYERS) await this.upsertNpc(npc);
-    await sql`update users set role = 'admin', rating = 1680 where handle = 'admin'`.execute(this.db);
-    await sql`update users set rating = 1723, wins = 32, losses = 11 where handle = 'spin-doctor'`.execute(this.db);
-    await sql`update users set rating = 1640, wins = 24, losses = 13 where handle = 'paddle-pro'`.execute(this.db);
-    await sql`update users set rating = 1512, wins = 18, losses = 15 where handle = 'net-ninja'`.execute(this.db);
-    await sql`update users set rating = 1450, wins = 15, losses = 17 where handle = 'top-spin'`.execute(this.db);
+    if (profile === "development") {
+      await sql`update users set role = 'admin', rating = 1680 where handle = 'admin'`.execute(this.db);
+      await sql`update users set rating = 1723, wins = 32, losses = 11 where handle = 'spin-doctor'`.execute(this.db);
+      await sql`update users set rating = 1640, wins = 24, losses = 13 where handle = 'paddle-pro'`.execute(this.db);
+      await sql`update users set rating = 1512, wins = 18, losses = 15 where handle = 'net-ninja'`.execute(this.db);
+      await sql`update users set rating = 1450, wins = 15, losses = 17 where handle = 'top-spin'`.execute(this.db);
+    }
   }
 
   async upsertDevUser(input: DevLoginInput): Promise<SessionUser> {
@@ -420,14 +426,16 @@ class MemoryRepository implements AppRepository {
 
   async close(): Promise<void> {}
 
-  async ensureSeedData(): Promise<void> {
-    for (const player of [
-      { handle: "spin-doctor", displayName: "스핀닥터", email: "spin@pong.local" },
-      { handle: "paddle-pro", displayName: "패들프로", email: "paddle@pong.local" },
-      { handle: "net-ninja", displayName: "네트닌자", email: "net@pong.local" },
-      { handle: "admin", displayName: "운영자", email: "admin@pong.local" }
-    ]) {
-      await this.upsertDevUser(player);
+  async ensureSeedData(profile: SeedProfile = "development"): Promise<void> {
+    if (profile === "development") {
+      for (const player of [
+        { handle: "spin-doctor", displayName: "스핀닥터", email: "spin@pong.local" },
+        { handle: "paddle-pro", displayName: "패들프로", email: "paddle@pong.local" },
+        { handle: "net-ninja", displayName: "네트닌자", email: "net@pong.local" },
+        { handle: "admin", displayName: "운영자", email: "admin@pong.local" }
+      ]) {
+        await this.upsertDevUser(player);
+      }
     }
     for (const npc of NPC_PLAYERS) {
       const existing = [...this.users.values()].find((user) => user.handle === npc.handle);
