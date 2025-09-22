@@ -1,4 +1,4 @@
-.PHONY: install typecheck build test smoke e2e
+.PHONY: install typecheck build test unit smoke smoke-http smoke-ws e2e dev down
 
 install:
 	pnpm install
@@ -10,11 +10,24 @@ build:
 	pnpm -r build
 
 test:
-	pnpm -r test
+	pnpm unit
 
-smoke:
-	node tests/smoke-api.mjs
-	node tests/smoke-ws.mjs
+unit:
+	pnpm unit
+
+smoke: smoke-http smoke-ws
+
+smoke-http:
+	pnpm smoke:http
+
+smoke-ws:
+	pnpm smoke:ws
+
+dev:
+	docker compose up --build
+
+down:
+	docker compose down --remove-orphans
 
 e2e:
-	pnpm test:e2e
+	pnpm e2e
