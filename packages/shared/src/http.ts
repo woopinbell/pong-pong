@@ -1,26 +1,37 @@
-export type UserRole = "user" | "admin";
-export type UserStatus = "active" | "banned";
-export type FriendshipStatus = "pending" | "accepted";
-export type TournamentStatus = "open" | "running" | "finished";
-export type MatchMode = "queue" | "ai" | "tournament";
+import { z } from "zod";
 
-export interface PublicUser {
-  id: string;
-  handle: string;
-  displayName: string;
-  avatarKey: string;
-  role: UserRole;
-  status: UserStatus;
-  rating: number;
-  wins: number;
-  losses: number;
-  online: boolean;
-  isNpc: boolean;
-}
+export const userRoleSchema = z.enum(["user", "admin"]);
+export const userStatusSchema = z.enum(["active", "banned"]);
+export const friendshipStatusSchema = z.enum(["pending", "accepted"]);
+export const tournamentStatusSchema = z.enum(["open", "running", "finished"]);
+export const matchModeSchema = z.enum(["queue", "ai", "tournament"]);
 
-export interface SessionUser extends PublicUser {
-  email: string | null;
-}
+export type UserRole = z.infer<typeof userRoleSchema>;
+export type UserStatus = z.infer<typeof userStatusSchema>;
+export type FriendshipStatus = z.infer<typeof friendshipStatusSchema>;
+export type TournamentStatus = z.infer<typeof tournamentStatusSchema>;
+export type MatchMode = z.infer<typeof matchModeSchema>;
+
+export const publicUserSchema = z.object({
+  id: z.string().uuid(),
+  handle: z.string().min(1),
+  displayName: z.string().min(1),
+  avatarKey: z.string(),
+  role: userRoleSchema,
+  status: userStatusSchema,
+  rating: z.number().int(),
+  wins: z.number().int().nonnegative(),
+  losses: z.number().int().nonnegative(),
+  online: z.boolean(),
+  isNpc: z.boolean()
+});
+
+export const sessionUserSchema = publicUserSchema.extend({
+  email: z.string().email().nullable()
+});
+
+export type PublicUser = z.infer<typeof publicUserSchema>;
+export type SessionUser = z.infer<typeof sessionUserSchema>;
 
 export interface MatchSummary {
   id: string;
