@@ -143,3 +143,42 @@ export const adminActionSummarySchema = z.object({
 });
 
 export type AdminActionSummary = z.infer<typeof adminActionSummarySchema>;
+
+export const apiErrorBodySchema = z.object({
+  error: z.object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+    requestId: z.string().min(1),
+    fieldErrors: z.record(z.array(z.string())).optional()
+  })
+});
+
+export type ApiErrorBody = z.infer<typeof apiErrorBodySchema>;
+
+export const emptyParamsSchema = z.object({}).strict();
+export const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
+export const handleParamsSchema = z.object({ handle: z.string().min(1).max(64) }).strict();
+
+export const devLoginBodySchema = z.object({
+  handle: z.string().trim().min(2).max(24).regex(/^[a-z0-9][a-z0-9-]*$/),
+  displayName: z.string().trim().min(1).max(40),
+  email: z.string().trim().email().optional()
+}).strict();
+
+export const chatBodySchema = z.object({ body: z.string().trim().min(1).max(240) }).strict();
+export const profileUpdateBodySchema = z.object({
+  displayName: z.string().trim().min(1).max(40).optional(),
+  avatarKey: z.string().trim().min(1).max(120).optional()
+}).strict().refine((body) => body.displayName !== undefined || body.avatarKey !== undefined, {
+  message: "변경할 프로필 값을 입력해주세요."
+});
+export const friendRequestBodySchema = z.object({ handle: z.string().trim().min(1).max(64) }).strict();
+export const tournamentCreateBodySchema = z.object({ name: z.string().trim().min(1).max(80) }).strict();
+export const adminBanBodySchema = z.object({
+  banned: z.boolean().optional(),
+  reason: z.string().trim().min(1).max(240).optional()
+}).strict();
+export const adminStatusBodySchema = z.object({
+  status: userStatusSchema,
+  reason: z.string().trim().min(1).max(240).optional()
+}).strict();
