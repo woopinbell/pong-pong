@@ -63,36 +63,44 @@ export const leaderboardEntrySchema = z.object({
 
 export type LeaderboardEntry = z.infer<typeof leaderboardEntrySchema>;
 
-export interface FriendSummary {
-  id: string;
-  user: PublicUser;
-  status: FriendshipStatus;
-}
+export const friendSummarySchema = z.object({
+  id: z.string().uuid(),
+  user: publicUserSchema,
+  status: friendshipStatusSchema
+});
 
-export interface ChatMessage {
-  id: string;
-  scope: "lobby" | "match";
-  roomId: string | null;
-  sender: PublicUser;
-  body: string;
-  createdAt: string;
-}
+export type FriendSummary = z.infer<typeof friendSummarySchema>;
 
-export interface LobbyStats {
-  onlinePlayers: number;
-  playingPlayers: number;
-  queuedPlayers: number;
-  activeRooms: number;
-  averageWaitSeconds: number | null;
-}
+export const chatMessageSchema = z.object({
+  id: z.string().uuid(),
+  scope: z.enum(["lobby", "match"]),
+  roomId: z.string().uuid().nullable(),
+  sender: publicUserSchema,
+  body: z.string().min(1).max(240),
+  createdAt: z.string().datetime()
+});
 
-export interface LobbyResponse {
-  me: SessionUser | null;
-  onlinePlayers: PublicUser[];
-  recentMatches: MatchSummary[];
-  chat: ChatMessage[];
-  stats: LobbyStats;
-}
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+export const lobbyStatsSchema = z.object({
+  onlinePlayers: z.number().int().nonnegative(),
+  playingPlayers: z.number().int().nonnegative(),
+  queuedPlayers: z.number().int().nonnegative(),
+  activeRooms: z.number().int().nonnegative(),
+  averageWaitSeconds: z.number().nonnegative().nullable()
+});
+
+export type LobbyStats = z.infer<typeof lobbyStatsSchema>;
+
+export const lobbyResponseSchema = z.object({
+  me: sessionUserSchema.nullable(),
+  onlinePlayers: z.array(publicUserSchema),
+  recentMatches: z.array(matchSummarySchema),
+  chat: z.array(chatMessageSchema),
+  stats: lobbyStatsSchema
+});
+
+export type LobbyResponse = z.infer<typeof lobbyResponseSchema>;
 
 export interface TournamentSummary {
   id: string;
