@@ -33,29 +33,35 @@ export const sessionUserSchema = publicUserSchema.extend({
 export type PublicUser = z.infer<typeof publicUserSchema>;
 export type SessionUser = z.infer<typeof sessionUserSchema>;
 
-export interface MatchSummary {
-  id: string;
-  mode: MatchMode;
-  opponentHandle: string;
-  result: "win" | "loss";
-  scoreLeft: number;
-  scoreRight: number;
-  ratingDelta: number;
-  endedAt: string;
-}
+export const matchSummarySchema = z.object({
+  id: z.string().uuid(),
+  mode: matchModeSchema,
+  opponentHandle: z.string().min(1),
+  result: z.enum(["win", "loss"]),
+  scoreLeft: z.number().int().nonnegative(),
+  scoreRight: z.number().int().nonnegative(),
+  ratingDelta: z.number().int(),
+  endedAt: z.string().datetime()
+});
 
-export interface DashboardSummary {
-  me: SessionUser;
-  recentMatches: MatchSummary[];
-  winRate: number;
-  bestStreak: number;
-}
+export type MatchSummary = z.infer<typeof matchSummarySchema>;
 
-export interface LeaderboardEntry {
-  rank: number;
-  user: PublicUser;
-  winRate: number;
-}
+export const dashboardSummarySchema = z.object({
+  me: sessionUserSchema,
+  recentMatches: z.array(matchSummarySchema),
+  winRate: z.number().min(0).max(100),
+  bestStreak: z.number().int().nonnegative()
+});
+
+export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
+
+export const leaderboardEntrySchema = z.object({
+  rank: z.number().int().positive(),
+  user: publicUserSchema,
+  winRate: z.number().min(0).max(100)
+});
+
+export type LeaderboardEntry = z.infer<typeof leaderboardEntrySchema>;
 
 export interface FriendSummary {
   id: string;
