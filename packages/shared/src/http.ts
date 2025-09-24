@@ -102,38 +102,44 @@ export const lobbyResponseSchema = z.object({
 
 export type LobbyResponse = z.infer<typeof lobbyResponseSchema>;
 
-export interface TournamentSummary {
-  id: string;
-  name: string;
-  status: TournamentStatus;
-  createdBy: PublicUser;
-  playerCount: number;
-  capacity: number;
-  winner: PublicUser | null;
-  entries: PublicUser[];
-  matches: TournamentMatchSummary[];
-}
+export const tournamentMatchSummarySchema = z.object({
+  id: z.string().uuid(),
+  tournamentId: z.string().uuid(),
+  round: z.enum(["semifinal", "final"]),
+  slot: z.number().int().nonnegative(),
+  status: z.enum(["pending", "ready", "running", "finished"]),
+  left: publicUserSchema.nullable(),
+  right: publicUserSchema.nullable(),
+  winner: publicUserSchema.nullable(),
+  scoreLeft: z.number().int().nonnegative().nullable(),
+  scoreRight: z.number().int().nonnegative().nullable(),
+  roomId: z.string().uuid().nullable(),
+  matchId: z.string().uuid().nullable()
+});
 
-export interface TournamentMatchSummary {
-  id: string;
-  tournamentId: string;
-  round: "semifinal" | "final";
-  slot: number;
-  status: "pending" | "ready" | "running" | "finished";
-  left: PublicUser | null;
-  right: PublicUser | null;
-  winner: PublicUser | null;
-  scoreLeft: number | null;
-  scoreRight: number | null;
-  roomId: string | null;
-  matchId: string | null;
-}
+export type TournamentMatchSummary = z.infer<typeof tournamentMatchSummarySchema>;
 
-export interface AdminActionSummary {
-  id: string;
-  actor: PublicUser | null;
-  target: PublicUser | null;
-  action: "ban" | "unban";
-  reason: string;
-  createdAt: string;
-}
+export const tournamentSummarySchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  status: tournamentStatusSchema,
+  createdBy: publicUserSchema,
+  playerCount: z.number().int().nonnegative(),
+  capacity: z.number().int().positive(),
+  winner: publicUserSchema.nullable(),
+  entries: z.array(publicUserSchema),
+  matches: z.array(tournamentMatchSummarySchema)
+});
+
+export type TournamentSummary = z.infer<typeof tournamentSummarySchema>;
+
+export const adminActionSummarySchema = z.object({
+  id: z.string().uuid(),
+  actor: publicUserSchema.nullable(),
+  target: publicUserSchema.nullable(),
+  action: z.enum(["ban", "unban"]),
+  reason: z.string(),
+  createdAt: z.string().datetime()
+});
+
+export type AdminActionSummary = z.infer<typeof adminActionSummarySchema>;
