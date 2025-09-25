@@ -182,3 +182,27 @@ export const adminStatusBodySchema = z.object({
   status: userStatusSchema,
   reason: z.string().trim().min(1).max(240).optional()
 }).strict();
+
+export const okResponseSchema = z.object({ ok: z.literal(true) });
+export const healthResponseSchema = z.object({ ok: z.literal(true), service: z.literal("pong-pong-api") });
+export const userResponseSchema = z.object({ user: sessionUserSchema });
+export const publicUserResponseSchema = z.object({ user: publicUserSchema });
+export const profileResponseSchema = z.object({ user: publicUserSchema, recentMatches: z.array(matchSummarySchema) });
+export const ownProfileResponseSchema = z.object({ profile: sessionUserSchema });
+export const friendsResponseSchema = z.object({ friends: z.array(friendSummarySchema) });
+export const friendResponseSchema = z.object({ friend: friendSummarySchema });
+export const chatResponseSchema = z.object({ message: chatMessageSchema });
+export const leaderboardResponseSchema = z.object({ entries: z.array(leaderboardEntrySchema) });
+export const tournamentsResponseSchema = z.object({ tournaments: z.array(tournamentSummarySchema) });
+export const tournamentResponseSchema = z.object({ tournament: tournamentSummarySchema });
+export const adminUsersResponseSchema = z.object({ users: z.array(publicUserSchema) });
+export const adminActionsResponseSchema = z.object({ actions: z.array(adminActionSummarySchema) });
+export const wsTicketResponseSchema = z.object({
+  ticket: z.string().min(32),
+  expiresInSeconds: z.literal(30),
+  protocolVersion: z.literal(1)
+});
+
+export type DevLoginBody = z.infer<typeof devLoginBodySchema>;
+export type ProfileUpdateBody = z.infer<typeof profileUpdateBodySchema>;
+export type WsTicketResponse = z.infer<typeof wsTicketResponseSchema>;
