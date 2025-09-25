@@ -13,7 +13,8 @@
     "seed:dev": "tsx src/cli.ts seed:dev",
     "seed:demo": "tsx src/cli.ts seed:demo",
     "memory-smoke": "tsx src/cli.ts memory-smoke",
-    "test": "vitest run"
+    "test": "vitest run --exclude \"**/*.integration.test.ts\"",
+    "postgres-integration": "vitest run src/postgres.integration.test.ts --testTimeout=120000 --hookTimeout=120000 --teardownTimeout=30000 --no-file-parallelism --maxWorkers=1"
   },
   "dependencies": {
     "@pong-pong/shared": "workspace:*",
@@ -21,6 +22,7 @@
     "pg": "^8.15.6"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.0.4",
     "@types/pg": "^8.11.14",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
