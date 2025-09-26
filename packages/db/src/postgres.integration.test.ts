@@ -117,6 +117,22 @@ describe("PostgreSQL integration", () => {
     });
   });
 
+  it("grants administrator access only through an explicit role assignment", async () => {
+    await withIsolatedDatabase(async ({ openRepository }) => {
+      const repository = openRepository();
+      await repository.ensureSeedData("development");
+
+      const loginUser = await repository.upsertDevUser({
+        handle: "admin",
+        displayName: "일반 사용자"
+      });
+      expect(loginUser.role).toBe("user");
+
+      const promoted = await repository.setUserRoleByHandle("admin", "admin");
+      expect(promoted.role).toBe("admin");
+    });
+  });
+
   it("uses a fresh schema for each isolated database", async () => {
     let firstSchema = "";
 
