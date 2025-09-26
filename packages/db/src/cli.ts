@@ -25,8 +25,16 @@ if (command === "memory-smoke") {
       if (command === "seed:dev" || command === "seed:demo") {
         await repo.ensureSeedData(command === "seed:dev" ? "development" : "demo");
         console.log(command === "seed:dev" ? "development seed complete" : "demo seed complete");
+      } else if (command === "user:set-role") {
+        const handle = process.argv[3];
+        const role = process.argv[4];
+        if (!handle || (role !== "user" && role !== "admin")) {
+          throw new Error("Usage: pnpm --filter @pong-pong/db user:set-role -- <handle> <user|admin>");
+        }
+        const user = await repo.setUserRoleByHandle(handle, role);
+        console.log(`${user.handle} role set to ${user.role}`);
       } else {
-        throw new Error("Usage: pnpm --filter @pong-pong/db migrate|seed:dev|seed:demo|memory-smoke");
+        throw new Error("Usage: pnpm --filter @pong-pong/db migrate|seed:dev|seed:demo|user:set-role|memory-smoke");
       }
     } finally {
       await repo.close();

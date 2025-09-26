@@ -24,6 +24,7 @@ describe("admin routes", () => {
       url: "/auth/dev-login",
       payload: { handle: "admin", displayName: "운영자" }
     });
+    await repo.setUserRoleByHandle("admin", "admin");
     const targetLogin = await app.inject({
       method: "POST",
       url: "/auth/dev-login",

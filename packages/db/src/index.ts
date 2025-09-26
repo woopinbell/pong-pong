@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
-import type { AdminActionSummary, ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
+import type { AdminActionSummary, ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary, UserRole } from "@pong-pong/shared";
 import { toAdminActionSummary, toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentMatchRecord, toTournamentMatchSummary, toTournamentSummary } from "./rowMappers";
 import type { AdminActionRow, ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentMatchRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
 
@@ -54,6 +54,7 @@ export interface AppRepository {
   createSession(userId: string): Promise<string>;
   getSessionUser(token: string | undefined): Promise<SessionUser | null>;
   deleteSession(token: string | undefined): Promise<void>;
+  setUserRoleByHandle(handle: string, role: UserRole): Promise<PublicUser>;
   getUserById(id: string): Promise<PublicUser | null>;
   getUserByHandle(handle: string): Promise<PublicUser | null>;
   updateProfile(userId: string, input: { displayName?: string; avatarKey?: string }): Promise<SessionUser>;
@@ -129,10 +130,11 @@ class PostgresRepository implements AppRepository {
     const displayName = input.displayName.trim() || handle;
     const result = await sql<UserRow>`
       insert into users (email, handle, display_name, avatar_key, role, is_npc)
-      values (${email}, ${handle}, ${displayName}, ${avatarFor(handle)}, ${handle === "admin" ? "admin" : "user"}, false)
+      values (${email}, ${handle}, ${displayName}, ${avatarFor(handle)}, 'user', false)
       on conflict (handle) do update set
         email = excluded.email,
         display_name = excluded.display_name,
+        role = 'user',
         is_npc = false
       returning *
     `.execute(this.db);
@@ -173,6 +175,17 @@ class PostgresRepository implements AppRepository {
   async deleteSession(token: string | undefined): Promise<void> {
     if (!token) return;
     await sql`delete from sessions where token = ${token}`.execute(this.db);
+  }
+
+  async setUserRoleByHandle(handle: string, role: UserRole): Promise<PublicUser> {
+    const result = await sql<UserRow>`
+      update users
+      set role = ${role}
+      where handle = ${normalizeHandle(handle)} and is_npc = false
+      returning *
+    `.execute(this.db);
+    if (!result.rows[0]) throw new Error("user not found");
+    return toPublicUser(result.rows[0]);
   }
 
   async getUserById(id: string): Promise<PublicUser | null> {
@@ -436,6 +449,11 @@ class MemoryRepository implements AppRepository {
       ]) {
         await this.upsertDevUser(player);
       }
+      const admin = [...this.users.values()].find((user) => user.handle === "admin");
+      if (admin) {
+        admin.role = "admin";
+        admin.rating = 1680;
+      }
     }
     for (const npc of NPC_PLAYERS) {
       const existing = [...this.users.values()].find((user) => user.handle === npc.handle);
@@ -458,14 +476,16 @@ class MemoryRepository implements AppRepository {
       handle,
       display_name: input.displayName || handle,
       avatar_key: avatarFor(handle),
-      role: handle === "admin" ? "admin" : "user",
+      role: "user",
       status: "active",
-      rating: handle === "admin" ? 1680 : 1200,
+      rating: 1200,
       wins: 0,
       losses: 0,
       is_npc: false
     };
     user.display_name = input.displayName || user.display_name;
+    user.email = input.email ?? user.email;
+    user.role = "user";
     user.is_npc = false;
     this.users.set(user.id, user);
     return toSessionUser(user, true);
@@ -485,6 +505,13 @@ class MemoryRepository implements AppRepository {
 
   async deleteSession(token: string | undefined): Promise<void> {
     if (token) this.sessions.delete(token);
+  }
+
+  async setUserRoleByHandle(handle: string, role: UserRole): Promise<PublicUser> {
+    const user = [...this.users.values()].find((item) => item.handle === normalizeHandle(handle) && !item.is_npc);
+    if (!user) throw new Error("user not found");
+    user.role = role;
+    return toPublicUser(user, true);
   }
 
   async getUserById(id: string): Promise<PublicUser | null> {
