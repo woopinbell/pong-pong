@@ -3,9 +3,17 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import type { AppRepository } from "@pong-pong/db";
+import * as http from "@pong-pong/shared";
 import type { SessionUser } from "@pong-pong/shared";
 import type { WebSocket } from "ws";
 import { GameHub } from "./gameHub";
+import {
+  installHttpErrorBoundary,
+  notFound,
+  parseInput,
+  parseOutput,
+  unauthorized as raiseUnauthorized
+} from "./httpBoundary";
 
 export interface BuildAppOptions {
   repo: AppRepository;
@@ -16,11 +24,12 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
   const hub = new GameHub(repo);
 
+  installHttpErrorBoundary(app);
   app.register(cors, {
     origin: [webOrigin, "http://localhost:3000", "http://localhost:8080"],
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["content-type", "authorization"]
+    allowedHeaders: ["content-type", "authorization", "x-request-id"]
   });
   app.register(cookie);
   app.register(async (realtime) => {
@@ -46,15 +55,14 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     });
   });
 
-  app.get("/health", async () => ({ ok: true, service: "pong-pong-api" }));
+  app.get("/health", async () => parseOutput(http.healthResponseSchema, {
+    ok: true,
+    service: "pong-pong-api"
+  }));
 
   app.post("/auth/dev-login", async (request, reply) => {
-    const body = request.body as { handle?: string; displayName?: string; email?: string };
-    const user = await repo.upsertDevUser({
-      handle: body.handle ?? "player",
-      displayName: body.displayName ?? body.handle ?? "플레이어",
-      email: body.email
-    });
+    const body = parseInput(http.devLoginBodySchema, request.body);
+    const user = await repo.upsertDevUser(body);
     const token = await repo.createSession(user.id);
     reply.setCookie("pp_session", token, {
       path: "/",
@@ -62,32 +70,32 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
       httpOnly: true,
       maxAge: 60 * 60 * 24 * 14
     });
-    return { user, token };
+    return parseOutput(http.userResponseSchema, { user });
   });
 
   app.post("/auth/logout", async (request, reply) => {
     await repo.deleteSession(readSessionToken(request));
     reply.clearCookie("pp_session", { path: "/" });
-    return { ok: true };
+    return parseOutput(http.okResponseSchema, { ok: true });
   });
 
-  app.get("/me", async (request, reply) => {
+  app.get("/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    return { user };
+    if (!user) raiseUnauthorized();
+    return parseOutput(http.userResponseSchema, { user });
   });
 
-  app.get("/auth/me", async (request, reply) => {
+  app.get("/auth/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    return { user };
+    if (!user) raiseUnauthorized();
+    return parseOutput(http.userResponseSchema, { user });
   });
 
-  app.get("/users/:id", async (request, reply) => {
-    const { id } = request.params as { id: string };
+  app.get("/users/:id", async (request) => {
+    const { id } = parseInput(http.idParamsSchema, request.params);
     const user = await repo.getUserById(id);
-    if (!user) return reply.code(404).send({ message: "not_found" });
-    return { user };
+    if (!user) notFound("사용자를 찾을 수 없습니다.");
+    return parseOutput(http.publicUserResponseSchema, { user });
   });
 
   app.get("/lobby", async (request) => {
@@ -127,32 +135,29 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     return await repo.getDashboard(user.id);
   });
 
-  app.get("/profile/:handle", async (request, reply) => {
-    const { handle } = request.params as { handle: string };
+  app.get("/profile/:handle", async (request) => {
+    const { handle } = parseInput(http.handleParamsSchema, request.params);
     const user = await repo.getUserByHandle(handle);
-    if (!user) return reply.code(404).send({ message: "프로필을 찾을 수 없습니다." });
-    return {
+    if (!user) notFound("프로필을 찾을 수 없습니다.");
+    return parseOutput(http.profileResponseSchema, {
       user,
       recentMatches: await repo.listRecentMatches(user.id)
-    };
+    });
   });
 
-  app.get("/profile/me", async (request, reply) => {
+  app.get("/profile/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    return { profile: user };
+    if (!user) raiseUnauthorized();
+    return parseOutput(http.ownProfileResponseSchema, { profile: user });
   });
 
-  app.patch("/profile/me", async (request, reply) => {
+  app.patch("/profile/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    const body = request.body as { displayName?: string; avatarKey?: string };
-    return {
-      profile: await repo.updateProfile(user.id, {
-        displayName: body.displayName,
-        avatarKey: body.avatarKey
-      })
-    };
+    if (!user) raiseUnauthorized();
+    const body = parseInput(http.profileUpdateBodySchema, request.body);
+    return parseOutput(http.ownProfileResponseSchema, {
+      profile: await repo.updateProfile(user.id, body)
+    });
   });
 
   app.get("/friends", async (request, reply) => {
