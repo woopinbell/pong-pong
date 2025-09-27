@@ -12,6 +12,7 @@ import {
   notFound,
   parseInput,
   parseOutput,
+  suspended as raiseSuspended,
   unauthorized as raiseUnauthorized
 } from "./httpBoundary";
 
@@ -100,39 +101,38 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.get("/lobby", async (request) => {
     const user = await currentUser(repo, request);
-    return {
+    return parseOutput(http.lobbyResponseSchema, {
       me: user,
       onlinePlayers: hub.onlinePlayers(),
       recentMatches: await repo.listRecentMatches(user?.id),
       chat: await repo.listLobbyChat(),
       stats: hub.liveStats()
-    };
+    });
   });
 
-  app.post("/chat/lobby", async (request, reply) => {
+  app.post("/chat/lobby", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (!isActive(user)) return suspended(reply);
-    const body = (request.body ?? {}) as { body?: string };
-    const messageBody = body.body?.trim() ?? "";
-    if (!messageBody) return reply.code(400).send({ message: "메시지를 입력해주세요." });
-    if (messageBody.length > 240) return reply.code(400).send({ message: "메시지는 240자 이내로 입력해주세요." });
-    return {
+    if (!user) raiseUnauthorized();
+    if (!isActive(user)) raiseSuspended();
+    const body = parseInput(http.chatBodySchema, request.body);
+    return parseOutput(http.chatResponseSchema, {
       message: await repo.createChatMessage({
         scope: "lobby",
         roomId: null,
         senderId: user.id,
-        body: messageBody
+        body: body.body
       })
-    };
+    });
   });
 
-  app.get("/leaderboard", async () => ({ entries: await repo.listLeaderboard() }));
+  app.get("/leaderboard", async () => parseOutput(http.leaderboardResponseSchema, {
+    entries: await repo.listLeaderboard()
+  }));
 
-  app.get("/dashboard", async (request, reply) => {
+  app.get("/dashboard", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    return await repo.getDashboard(user.id);
+    if (!user) raiseUnauthorized();
+    return parseOutput(http.dashboardSummarySchema, await repo.getDashboard(user.id));
   });
 
   app.get("/profile/:handle", async (request) => {
@@ -160,33 +160,30 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     });
   });
 
-  app.get("/friends", async (request, reply) => {
+  app.get("/friends", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    return { friends: await repo.listFriends(user.id) };
+    if (!user) raiseUnauthorized();
+    return parseOutput(http.friendsResponseSchema, { friends: await repo.listFriends(user.id) });
   });
 
-  app.post("/friends/request", async (request, reply) => {
+  const requestFriend = async (request: FastifyRequest) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (!isActive(user)) return suspended(reply);
-    const body = request.body as { handle?: string };
-    return { friend: await repo.requestFriend(user.id, body.handle ?? "") };
-  });
+    if (!user) raiseUnauthorized();
+    if (!isActive(user)) raiseSuspended();
+    const body = parseInput(http.friendRequestBodySchema, request.body);
+    return parseOutput(http.friendResponseSchema, {
+      friend: await repo.requestFriend(user.id, body.handle)
+    });
+  };
 
-  app.post("/friends", async (request, reply) => {
-    const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (!isActive(user)) return suspended(reply);
-    const body = request.body as { handle?: string };
-    return { friend: await repo.requestFriend(user.id, body.handle ?? "") };
-  });
+  app.post("/friends/request", requestFriend);
+  app.post("/friends", requestFriend);
 
-  app.post("/friends/:id/accept", async (request, reply) => {
+  app.post("/friends/:id/accept", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    const { id } = request.params as { id: string };
-    return { friend: await repo.acceptFriend(user.id, id) };
+    if (!user) raiseUnauthorized();
+    const { id } = parseInput(http.idParamsSchema, request.params);
+    return parseOutput(http.friendResponseSchema, { friend: await repo.acceptFriend(user.id, id) });
   });
 
   app.get("/tournaments", async () => ({ tournaments: await repo.listTournaments() }));
