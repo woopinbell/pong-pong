@@ -8,6 +8,7 @@ import type { SessionUser } from "@pong-pong/shared";
 import type { WebSocket } from "ws";
 import { GameHub } from "./gameHub";
 import {
+  forbidden as raiseForbidden,
   installHttpErrorBoundary,
   notFound,
   parseInput,
@@ -186,54 +187,54 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     return parseOutput(http.friendResponseSchema, { friend: await repo.acceptFriend(user.id, id) });
   });
 
-  app.get("/tournaments", async () => ({ tournaments: await repo.listTournaments() }));
+  app.get("/tournaments", async () => parseOutput(http.tournamentsResponseSchema, {
+    tournaments: await repo.listTournaments()
+  }));
 
-  app.post("/tournaments", async (request, reply) => {
+  app.post("/tournaments", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (!isActive(user)) return suspended(reply);
-    const body = request.body as { name?: string };
-    return { tournament: await repo.createTournament({ name: body.name ?? "퐁퐁 주간 컵", createdBy: user.id }) };
+    if (!user) raiseUnauthorized();
+    if (!isActive(user)) raiseSuspended();
+    const body = parseInput(http.tournamentCreateBodySchema, request.body);
+    return parseOutput(http.tournamentResponseSchema, {
+      tournament: await repo.createTournament({ name: body.name, createdBy: user.id })
+    });
   });
 
-  app.post("/tournaments/:id/join", async (request, reply) => {
+  app.post("/tournaments/:id/join", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (!isActive(user)) return suspended(reply);
-    const { id } = request.params as { id: string };
-    return { tournament: await repo.joinTournament(id, user.id) };
+    if (!user) raiseUnauthorized();
+    if (!isActive(user)) raiseSuspended();
+    const { id } = parseInput(http.idParamsSchema, request.params);
+    return parseOutput(http.tournamentResponseSchema, { tournament: await repo.joinTournament(id, user.id) });
   });
 
-  app.get("/admin/users", async (request, reply) => {
-    const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
-    return { users: await repo.listAdminUsers() };
+  app.get("/admin/users", async (request) => {
+    const user = await requireAdmin(repo, request);
+    return parseOutput(http.adminUsersResponseSchema, { users: await repo.listAdminUsers() });
   });
 
-  app.get("/admin/actions", async (request, reply) => {
-    const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
-    return { actions: await repo.listAdminActions() };
+  app.get("/admin/actions", async (request) => {
+    await requireAdmin(repo, request);
+    return parseOutput(http.adminActionsResponseSchema, { actions: await repo.listAdminActions() });
   });
 
-  app.post("/admin/users/:id/ban", async (request, reply) => {
-    const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
-    const { id } = request.params as { id: string };
-    const body = request.body as { banned?: boolean; reason?: string };
-    return { user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review") };
+  app.post("/admin/users/:id/ban", async (request) => {
+    const user = await requireAdmin(repo, request);
+    const { id } = parseInput(http.idParamsSchema, request.params);
+    const body = parseInput(http.adminBanBodySchema, request.body ?? {});
+    return parseOutput(http.publicUserResponseSchema, {
+      user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review")
+    });
   });
 
-  app.patch("/admin/users/:id/status", async (request, reply) => {
-    const user = await currentUser(repo, request);
-    if (!user) return unauthorized(reply);
-    if (user.role !== "admin") return reply.code(403).send({ message: "운영자 권한이 필요합니다." });
-    const { id } = request.params as { id: string };
-    const body = request.body as { status?: "active" | "banned"; reason?: string };
-    return { user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review") };
+  app.patch("/admin/users/:id/status", async (request) => {
+    const user = await requireAdmin(repo, request);
+    const { id } = parseInput(http.idParamsSchema, request.params);
+    const body = parseInput(http.adminStatusBodySchema, request.body);
+    return parseOutput(http.publicUserResponseSchema, {
+      user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review")
+    });
   });
 
   return app;
@@ -257,6 +258,13 @@ function unauthorized(reply: FastifyReply) {
 
 function suspended(reply: FastifyReply) {
   return reply.code(403).send({ message: "정지된 계정은 이 작업을 수행할 수 없습니다." });
+}
+
+async function requireAdmin(repo: AppRepository, request: FastifyRequest): Promise<SessionUser> {
+  const user = await currentUser(repo, request);
+  if (!user) raiseUnauthorized();
+  if (user.role !== "admin") raiseForbidden();
+  return user;
 }
 
 function isActive(user: SessionUser): boolean {
