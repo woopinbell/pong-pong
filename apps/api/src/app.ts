@@ -1,20 +1,20 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
-import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import type { AppRepository } from "@pong-pong/db";
 import * as http from "@pong-pong/shared";
 import type { SessionUser } from "@pong-pong/shared";
 import type { WebSocket } from "ws";
 import { GameHub } from "./gameHub";
 import {
-  forbidden as raiseForbidden,
+  forbidden,
   installHttpErrorBoundary,
   notFound,
   parseInput,
   parseOutput,
-  suspended as raiseSuspended,
-  unauthorized as raiseUnauthorized
+  suspended,
+  unauthorized
 } from "./httpBoundary";
 
 export interface BuildAppOptions {
@@ -83,13 +83,13 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.get("/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     return parseOutput(http.userResponseSchema, { user });
   });
 
   app.get("/auth/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     return parseOutput(http.userResponseSchema, { user });
   });
 
@@ -113,8 +113,8 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.post("/chat/lobby", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
-    if (!isActive(user)) raiseSuspended();
+    if (!user) unauthorized();
+    if (!isActive(user)) suspended();
     const body = parseInput(http.chatBodySchema, request.body);
     return parseOutput(http.chatResponseSchema, {
       message: await repo.createChatMessage({
@@ -132,7 +132,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.get("/dashboard", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     return parseOutput(http.dashboardSummarySchema, await repo.getDashboard(user.id));
   });
 
@@ -148,13 +148,13 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.get("/profile/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     return parseOutput(http.ownProfileResponseSchema, { profile: user });
   });
 
   app.patch("/profile/me", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     const body = parseInput(http.profileUpdateBodySchema, request.body);
     return parseOutput(http.ownProfileResponseSchema, {
       profile: await repo.updateProfile(user.id, body)
@@ -163,14 +163,14 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.get("/friends", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     return parseOutput(http.friendsResponseSchema, { friends: await repo.listFriends(user.id) });
   });
 
   const requestFriend = async (request: FastifyRequest) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
-    if (!isActive(user)) raiseSuspended();
+    if (!user) unauthorized();
+    if (!isActive(user)) suspended();
     const body = parseInput(http.friendRequestBodySchema, request.body);
     return parseOutput(http.friendResponseSchema, {
       friend: await repo.requestFriend(user.id, body.handle)
@@ -182,7 +182,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.post("/friends/:id/accept", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
+    if (!user) unauthorized();
     const { id } = parseInput(http.idParamsSchema, request.params);
     return parseOutput(http.friendResponseSchema, { friend: await repo.acceptFriend(user.id, id) });
   });
@@ -193,8 +193,8 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.post("/tournaments", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
-    if (!isActive(user)) raiseSuspended();
+    if (!user) unauthorized();
+    if (!isActive(user)) suspended();
     const body = parseInput(http.tournamentCreateBodySchema, request.body);
     return parseOutput(http.tournamentResponseSchema, {
       tournament: await repo.createTournament({ name: body.name, createdBy: user.id })
@@ -203,8 +203,8 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 
   app.post("/tournaments/:id/join", async (request) => {
     const user = await currentUser(repo, request);
-    if (!user) raiseUnauthorized();
-    if (!isActive(user)) raiseSuspended();
+    if (!user) unauthorized();
+    if (!isActive(user)) suspended();
     const { id } = parseInput(http.idParamsSchema, request.params);
     return parseOutput(http.tournamentResponseSchema, { tournament: await repo.joinTournament(id, user.id) });
   });
@@ -252,18 +252,10 @@ async function currentUser(repo: AppRepository, request: FastifyRequest): Promis
   return repo.getSessionUser(readSessionToken(request));
 }
 
-function unauthorized(reply: FastifyReply) {
-  return reply.code(401).send({ message: "로그인이 필요합니다." });
-}
-
-function suspended(reply: FastifyReply) {
-  return reply.code(403).send({ message: "정지된 계정은 이 작업을 수행할 수 없습니다." });
-}
-
 async function requireAdmin(repo: AppRepository, request: FastifyRequest): Promise<SessionUser> {
   const user = await currentUser(repo, request);
-  if (!user) raiseUnauthorized();
-  if (user.role !== "admin") raiseForbidden();
+  if (!user) unauthorized();
+  if (user.role !== "admin") forbidden();
   return user;
 }
 
