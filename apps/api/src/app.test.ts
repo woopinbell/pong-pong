@@ -25,8 +25,8 @@ describe("api routes", () => {
       payload: { handle: "tester", displayName: "테스터" }
     });
     expect(login.statusCode).toBe(200);
-    const token = login.json<{ token: string }>().token;
-    const me = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${token}` } });
+    expect(login.json<Record<string, unknown>>()).not.toHaveProperty("token");
+    const me = await app.inject({ method: "GET", url: "/me", headers: { cookie: sessionCookie(login) } });
     expect(me.statusCode).toBe(200);
     expect(me.json<{ user: { handle: string } }>().user.handle).toBe("tester");
   });
@@ -51,15 +51,15 @@ describe("api routes", () => {
       url: "/auth/dev-login",
       payload: { handle: "chat-api", displayName: "채팅API" }
     });
-    const token = login.json<{ token: string }>().token;
+    const cookie = sessionCookie(login);
 
     const sent = await app.inject({
       method: "POST",
       url: "/chat/lobby",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { cookie },
       payload: { body: "로비 채팅 저장 확인" }
     });
-    const lobby = await app.inject({ method: "GET", url: "/lobby", headers: { authorization: `Bearer ${token}` } });
+    const lobby = await app.inject({ method: "GET", url: "/lobby", headers: { cookie } });
 
     expect(sent.statusCode).toBe(200);
     expect(sent.json<{ message: { body: string; sender: { handle: string } } }>().message).toMatchObject({
@@ -71,12 +71,21 @@ describe("api routes", () => {
 
   it("invalidates the server session on logout", async () => {
     const login = await app.inject({ method: "POST", url: "/auth/dev-login", payload: { handle: "logout-tester", displayName: "로그아웃" } });
-    const token = login.json<{ token: string }>().token;
-    const before = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${token}` } });
+    const cookie = sessionCookie(login);
+    const before = await app.inject({ method: "GET", url: "/me", headers: { cookie } });
     expect(before.statusCode).toBe(200);
-    const logout = await app.inject({ method: "POST", url: "/auth/logout", headers: { authorization: `Bearer ${token}` } });
+    const logout = await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie } });
     expect(logout.statusCode).toBe(200);
-    const after = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${token}` } });
+    const after = await app.inject({ method: "GET", url: "/me", headers: { cookie } });
     expect(after.statusCode).toBe(401);
   });
 });
+
+function sessionCookie(response: { headers: Record<string, string | string[] | number | undefined> }): string {
+  const value = response.headers["set-cookie"];
+  const header = Array.isArray(value)
+    ? value.find((item) => item.startsWith("pp_session="))
+    : typeof value === "string" ? value : undefined;
+  if (!header) throw new Error("pp_session cookie was not set");
+  return header.split(";", 1)[0];
+}

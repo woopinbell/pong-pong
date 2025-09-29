@@ -5,10 +5,14 @@ import { buildApp } from "./app";
 describe("admin routes", () => {
   let repo: AppRepository;
   let app: ReturnType<typeof buildApp>;
+  let adminCookie: string;
 
   beforeEach(async () => {
     repo = createMemoryRepository();
-    await repo.ensureSeedData();
+    await repo.ensureSeedData("development");
+    const admin = await repo.getUserByHandle("admin");
+    if (!admin) throw new Error("seed:dev admin was not created");
+    adminCookie = `pp_session=${await repo.createSession(admin.id)}`;
     app = buildApp({ repo, webOrigin: "http://localhost:3000" });
     await app.ready();
   });
@@ -19,35 +23,28 @@ describe("admin routes", () => {
   });
 
   it("allows an admin to toggle a user status", async () => {
-    const adminLogin = await app.inject({
-      method: "POST",
-      url: "/auth/dev-login",
-      payload: { handle: "admin", displayName: "운영자" }
-    });
-    await repo.setUserRoleByHandle("admin", "admin");
     const targetLogin = await app.inject({
       method: "POST",
       url: "/auth/dev-login",
       payload: { handle: "target", displayName: "대상" }
     });
 
-    const adminToken = adminLogin.json<{ token: string }>().token;
     const targetId = targetLogin.json<{ user: { id: string } }>().user.id;
     const ban = await app.inject({
       method: "POST",
       url: `/admin/users/${targetId}/ban`,
-      headers: { authorization: `Bearer ${adminToken}` },
+      headers: { cookie: adminCookie },
       payload: { banned: true, reason: "smoke" }
     });
     const actions = await app.inject({
       method: "GET",
       url: "/admin/actions",
-      headers: { authorization: `Bearer ${adminToken}` }
+      headers: { cookie: adminCookie }
     });
     const blockedChat = await app.inject({
       method: "POST",
       url: "/chat/lobby",
-      headers: { authorization: `Bearer ${targetLogin.json<{ token: string }>().token}` },
+      headers: { cookie: sessionCookie(targetLogin) },
       payload: { body: "정지 후 채팅" }
     });
 
@@ -57,3 +54,12 @@ describe("admin routes", () => {
     expect(blockedChat.statusCode).toBe(403);
   });
 });
+
+function sessionCookie(response: { headers: Record<string, string | string[] | number | undefined> }): string {
+  const value = response.headers["set-cookie"];
+  const header = Array.isArray(value)
+    ? value.find((item) => item.startsWith("pp_session="))
+    : typeof value === "string" ? value : undefined;
+  if (!header) throw new Error("pp_session cookie was not set");
+  return header.split(";", 1)[0];
+}

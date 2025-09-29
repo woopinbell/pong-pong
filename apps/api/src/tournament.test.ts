@@ -5,7 +5,7 @@ import { buildApp } from "./app";
 describe("tournament routes", () => {
   let repo: AppRepository;
   let app: ReturnType<typeof buildApp>;
-  let token: string;
+  let cookie: string;
 
   beforeEach(async () => {
     repo = createMemoryRepository();
@@ -17,7 +17,7 @@ describe("tournament routes", () => {
       url: "/auth/dev-login",
       payload: { handle: "cup", displayName: "컵참가자" }
     });
-    token = login.json<{ token: string }>().token;
+    cookie = sessionCookie(login);
   });
 
   afterEach(async () => {
@@ -29,7 +29,7 @@ describe("tournament routes", () => {
     const created = await app.inject({
       method: "POST",
       url: "/tournaments",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { cookie },
       payload: { name: "목요일 컵" }
     });
     const listed = await app.inject({ method: "GET", url: "/tournaments" });
@@ -42,7 +42,7 @@ describe("tournament routes", () => {
     const created = await app.inject({
       method: "POST",
       url: "/tournaments",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { cookie },
       payload: { name: "브래킷 컵" }
     });
     const tournamentId = created.json<{ tournament: { id: string } }>().tournament.id;
@@ -55,7 +55,7 @@ describe("tournament routes", () => {
       await app.inject({
         method: "POST",
         url: `/tournaments/${tournamentId}/join`,
-        headers: { authorization: `Bearer ${login.json<{ token: string }>().token}` }
+        headers: { cookie: sessionCookie(login) }
       });
     }
     const listed = await app.inject({ method: "GET", url: "/tournaments" });
@@ -66,3 +66,12 @@ describe("tournament routes", () => {
     expect(cup?.matches.every((match) => match.status === "ready")).toBe(true);
   });
 });
+
+function sessionCookie(response: { headers: Record<string, string | string[] | number | undefined> }): string {
+  const value = response.headers["set-cookie"];
+  const header = Array.isArray(value)
+    ? value.find((item) => item.startsWith("pp_session="))
+    : typeof value === "string" ? value : undefined;
+  if (!header) throw new Error("pp_session cookie was not set");
+  return header.split(";", 1)[0];
+}
