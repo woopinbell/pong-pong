@@ -17,12 +17,15 @@ import {
   unauthorized
 } from "./httpBoundary";
 
+export type AppMode = "development" | "test" | "production" | "demo";
+
 export interface BuildAppOptions {
   repo: AppRepository;
   webOrigin: string;
+  appMode?: AppMode;
 }
 
-export function buildApp({ repo, webOrigin }: BuildAppOptions) {
+export function buildApp({ repo, webOrigin, appMode = readAppMode() }: BuildAppOptions) {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
   const hub = new GameHub(repo);
 
@@ -31,7 +34,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     origin: [webOrigin, "http://localhost:3000", "http://localhost:8080"],
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["content-type", "authorization", "x-request-id"]
+    allowedHeaders: ["content-type", "x-request-id"]
   });
   app.register(cookie);
   app.register(async (realtime) => {
@@ -62,18 +65,21 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
     service: "pong-pong-api"
   }));
 
-  app.post("/auth/dev-login", async (request, reply) => {
-    const body = parseInput(http.devLoginBodySchema, request.body);
-    const user = await repo.upsertDevUser(body);
-    const token = await repo.createSession(user.id);
-    reply.setCookie("pp_session", token, {
-      path: "/",
-      sameSite: "lax",
-      httpOnly: true,
-      maxAge: 60 * 60 * 24 * 14
+  if (appMode === "development" || appMode === "test") {
+    app.post("/auth/dev-login", async (request, reply) => {
+      const body = parseInput(http.devLoginBodySchema, request.body);
+      const user = await repo.upsertDevUser(body);
+      const token = await repo.createSession(user.id);
+      reply.setCookie("pp_session", token, {
+        path: "/",
+        sameSite: "lax",
+        httpOnly: true,
+        secure: useSecureCookies(appMode),
+        maxAge: 60 * 60 * 24 * 14
+      });
+      return parseOutput(http.userResponseSchema, { user });
     });
-    return parseOutput(http.userResponseSchema, { user });
-  });
+  }
 
   app.post("/auth/logout", async (request, reply) => {
     await repo.deleteSession(readSessionToken(request));
@@ -241,11 +247,7 @@ export function buildApp({ repo, webOrigin }: BuildAppOptions) {
 }
 
 function readSessionToken(request: FastifyRequest): string | undefined {
-  const cookieToken = request.cookies?.pp_session;
-  const header = request.headers.authorization?.replace(/^Bearer\s+/i, "");
-  const queryToken = (request.query as { session?: string } | undefined)?.session;
-  const rawQueryToken = new URL(request.raw.url ?? "/", "http://localhost").searchParams.get("session") ?? undefined;
-  return cookieToken ?? header ?? queryToken ?? rawQueryToken;
+  return request.cookies?.pp_session;
 }
 
 async function currentUser(repo: AppRepository, request: FastifyRequest): Promise<SessionUser | null> {
@@ -261,4 +263,15 @@ async function requireAdmin(repo: AppRepository, request: FastifyRequest): Promi
 
 function isActive(user: SessionUser): boolean {
   return user.status === "active";
+}
+
+function readAppMode(input = process.env): AppMode {
+  if (input.APP_MODE === "demo") return "demo";
+  if (input.NODE_ENV === "production") return "production";
+  if (input.NODE_ENV === "test") return "test";
+  return "development";
+}
+
+function useSecureCookies(mode: AppMode): boolean {
+  return mode === "production" || mode === "demo";
 }
