@@ -52,6 +52,7 @@ const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
 const BALL_ACCELERATION_PER_TICK = 0.015;
 const MAX_BALL_SPEED = 18;
 const NPC_QUEUE_FALLBACK_MS = 6000;
+const SIMULATION_TIMESTEP_MS = 50;
 
 type AiProfile = {
   reactionTicks: number;
@@ -339,7 +340,7 @@ export class GameHub {
     if (room.ai) room.ready.right = true;
     if (room.ready.left && room.ready.right && !room.timer) {
       room.snapshot.phase = "playing";
-      room.timer = setInterval(() => this.tick(room).catch(() => undefined), 1000 / TICK_RATE);
+      room.timer = setInterval(() => this.tick(room).catch(() => undefined), SIMULATION_TIMESTEP_MS);
     }
     this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
   }
@@ -367,46 +368,25 @@ export class GameHub {
     room.snapshot.phase = "playing";
     room.snapshot.serverTime = new Date().toISOString();
     if (!room.timer) {
-      room.timer = setInterval(() => this.tick(room).catch(() => undefined), 1000 / TICK_RATE);
+      room.timer = setInterval(() => this.tick(room).catch(() => undefined), SIMULATION_TIMESTEP_MS);
     }
     this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
   }
 
   private async tick(room: Room): Promise<void> {
-    const state = room.snapshot;
-    if (state.phase !== "playing") return;
-    state.tick += 1;
-    state.serverTime = new Date().toISOString();
-
-    const speed = 13;
-    state.paddles.left.y = clamp(state.paddles.left.y + state.paddles.left.dy * speed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
+    if (room.snapshot.phase !== "playing") return;
     if (room.ai) {
       updateAiPaddleIntent(room);
     }
-    const rightSpeed = room.ai ? speed * aiProfileFor(room.npcUser?.rating ?? 1200).paddleSpeedMultiplier : speed;
-    state.paddles.right.y = clamp(state.paddles.right.y + state.paddles.right.dy * rightSpeed, 16, GAME_HEIGHT - PADDLE_HEIGHT - 16);
+    room.simulation = PongSimulation.step(room.simulation, {
+      left: room.snapshot.paddles.left.dy,
+      right: room.snapshot.paddles.right.dy
+    }, SIMULATION_TIMESTEP_MS);
+    syncSnapshot(room);
+    this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: room.snapshot });
 
-    state.ball.position.x += state.ball.velocity.x;
-    state.ball.position.y += state.ball.velocity.y;
-    if (state.ball.position.y < BALL_RADIUS || state.ball.position.y > GAME_HEIGHT - BALL_RADIUS) {
-      state.ball.velocity.y *= -1;
-    }
-    collidePaddle(state, "left", 32);
-    collidePaddle(state, "right", GAME_WIDTH - 32);
-
-    if (state.ball.position.x < 0) {
-      state.rightScore += 1;
-      resetBall(state, -1);
-    }
-    if (state.ball.position.x > GAME_WIDTH) {
-      state.leftScore += 1;
-      resetBall(state, 1);
-    }
-    accelerateBall(state);
-    this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: state });
-
-    if (state.leftScore >= WINNING_SCORE || state.rightScore >= WINNING_SCORE || state.tick >= TICK_RATE * 45) {
-      await this.finishRoom(room, state.leftScore >= state.rightScore ? "left" : "right");
+    if (room.simulation.phase === "finished" && room.simulation.winnerSide) {
+      await this.finishRoom(room, room.simulation.winnerSide);
     }
   }
 
@@ -489,6 +469,26 @@ function clearQueueTimer(entry: QueueEntry): void {
     clearTimeout(entry.npcFallbackTimer);
     entry.npcFallbackTimer = null;
   }
+}
+
+function syncSnapshot(room: Room): void {
+  const state = room.simulation;
+  room.snapshot.tick = state.tick;
+  room.snapshot.leftScore = state.leftScore;
+  room.snapshot.rightScore = state.rightScore;
+  room.snapshot.paddles.left = {
+    y: state.paddles.left.y,
+    dy: state.paddles.left.direction
+  };
+  room.snapshot.paddles.right = {
+    y: state.paddles.right.y,
+    dy: state.paddles.right.direction
+  };
+  room.snapshot.ball = {
+    position: { ...state.ball.position },
+    velocity: { ...state.ball.velocity }
+  };
+  room.snapshot.serverTime = new Date().toISOString();
 }
 
 function clamp(value: number, min: number, max: number): number {
