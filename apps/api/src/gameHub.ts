@@ -3,12 +3,6 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import type { AppRepository } from "@pong-pong/db";
 import {
-  BALL_RADIUS,
-  GAME_HEIGHT,
-  GAME_WIDTH,
-  PADDLE_HEIGHT,
-  TICK_RATE,
-  WINNING_SCORE,
   encodeServerEvent,
   parseClientEvent,
   type GameFinished,
@@ -45,24 +39,12 @@ type Room = {
   mode: MatchMode;
   tournamentMatchId: string | null;
   npcUser: PublicUser | null;
-  aiTargetY: number;
   simulation: PongSimulationState;
   aiController: PongAi | null;
 };
 
-const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
-const BALL_ACCELERATION_PER_TICK = 0.015;
-const MAX_BALL_SPEED = 18;
 const NPC_QUEUE_FALLBACK_MS = 6000;
 const SIMULATION_TIMESTEP_MS = 50;
-
-type AiProfile = {
-  reactionTicks: number;
-  predictionNoise: number;
-  mistakeChance: number;
-  paddleSpeedMultiplier: number;
-  deadZone: number;
-};
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
@@ -290,7 +272,6 @@ export class GameHub {
       mode: options.mode,
       tournamentMatchId: options.tournamentMatchId ?? null,
       npcUser,
-      aiTargetY: GAME_HEIGHT / 2,
       simulation,
       aiController: options.ai ? new PongAi(roomId, npcUser?.rating ?? 1200) : null,
       snapshot: {
@@ -492,98 +473,4 @@ function syncSnapshot(room: Room): void {
     velocity: { ...state.ball.velocity }
   };
   room.snapshot.serverTime = new Date().toISOString();
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function updateAiPaddleIntent(room: Room): void {
-  const state = room.snapshot;
-  const profile = aiProfileFor(room.npcUser?.rating ?? 1200);
-  if (state.tick % profile.reactionTicks === 0) {
-    const targetBase = state.ball.velocity.x > 0 ? predictedBallY(state) : GAME_HEIGHT / 2;
-    const noise = signedDeterministic(room.id, state.tick, 1) * profile.predictionNoise;
-    const mistake = deterministicUnit(room.id, state.tick, 2) < profile.mistakeChance;
-    const mistakeOffset = mistake ? signedDeterministic(room.id, state.tick, 3) * 110 : 0;
-    room.aiTargetY = clamp(targetBase + noise + mistakeOffset, 16 + PADDLE_HEIGHT / 2, GAME_HEIGHT - 16 - PADDLE_HEIGHT / 2);
-  }
-  const center = state.paddles.right.y + PADDLE_HEIGHT / 2;
-  state.paddles.right.dy = room.aiTargetY > center + profile.deadZone ? 1 : room.aiTargetY < center - profile.deadZone ? -1 : 0;
-}
-
-function aiProfileFor(rating: number): AiProfile {
-  if (rating >= 1400) {
-    return { reactionTicks: 3, predictionNoise: 20, mistakeChance: 0.04, paddleSpeedMultiplier: 1.05, deadZone: 10 };
-  }
-  if (rating >= 1300) {
-    return { reactionTicks: 4, predictionNoise: 34, mistakeChance: 0.08, paddleSpeedMultiplier: 0.96, deadZone: 14 };
-  }
-  if (rating >= 1200) {
-    return { reactionTicks: 6, predictionNoise: 54, mistakeChance: 0.12, paddleSpeedMultiplier: 0.86, deadZone: 18 };
-  }
-  return { reactionTicks: 8, predictionNoise: 78, mistakeChance: 0.18, paddleSpeedMultiplier: 0.74, deadZone: 24 };
-}
-
-function predictedBallY(state: GameSnapshot): number {
-  if (state.ball.velocity.x <= 0) return state.ball.position.y;
-  const distance = GAME_WIDTH - 32 - state.ball.position.x;
-  const ticks = distance / Math.max(1, state.ball.velocity.x);
-  let y = state.ball.position.y + state.ball.velocity.y * ticks;
-  const min = BALL_RADIUS;
-  const max = GAME_HEIGHT - BALL_RADIUS;
-  while (y < min || y > max) {
-    if (y < min) y = min + (min - y);
-    if (y > max) y = max - (y - max);
-  }
-  return y;
-}
-
-function deterministicUnit(seed: string, tick: number, salt: number): number {
-  const value = Math.sin(hashString(seed) * 0.001 + tick * 12.9898 + salt * 78.233) * 43758.5453;
-  return value - Math.floor(value);
-}
-
-function signedDeterministic(seed: string, tick: number, salt: number): number {
-  return deterministicUnit(seed, tick, salt) * 2 - 1;
-}
-
-function hashString(value: string): number {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-  }
-  return hash;
-}
-
-function resetBall(state: GameSnapshot, xDirection: 1 | -1): void {
-  state.ball.position = { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 };
-  const elapsedBoost = Math.min(1.35, 1 + state.tick / (TICK_RATE * 90));
-  state.ball.velocity = {
-    x: INITIAL_BALL_VELOCITY.x * elapsedBoost * xDirection,
-    y: INITIAL_BALL_VELOCITY.y * elapsedBoost * (state.tick % 2 === 0 ? 1 : -1)
-  };
-}
-
-function collidePaddle(state: GameSnapshot, side: PlayerSide, x: number): void {
-  const paddle = state.paddles[side];
-  const ball = state.ball;
-  const withinY = ball.position.y >= paddle.y && ball.position.y <= paddle.y + PADDLE_HEIGHT;
-  const withinX = side === "left" ? ball.position.x - BALL_RADIUS <= x + 18 : ball.position.x + BALL_RADIUS >= x - 18;
-  if (withinX && withinY && Math.sign(ball.velocity.x) === (side === "left" ? -1 : 1)) {
-    ball.velocity.x *= -1.04;
-    const offset = (ball.position.y - (paddle.y + PADDLE_HEIGHT / 2)) / (PADDLE_HEIGHT / 2);
-    ball.velocity.y = offset * 7;
-  }
-}
-
-function accelerateBall(state: GameSnapshot): void {
-  const velocity = state.ball.velocity;
-  const currentSpeed = Math.hypot(velocity.x, velocity.y);
-  if (currentSpeed <= 0 || currentSpeed >= MAX_BALL_SPEED) return;
-  const elapsedMinimum = Math.min(MAX_BALL_SPEED, Math.hypot(INITIAL_BALL_VELOCITY.x, INITIAL_BALL_VELOCITY.y) + state.tick * BALL_ACCELERATION_PER_TICK);
-  const nextSpeed = Math.min(MAX_BALL_SPEED, Math.max(currentSpeed + BALL_ACCELERATION_PER_TICK, elapsedMinimum));
-  const scale = nextSpeed / currentSpeed;
-  velocity.x *= scale;
-  velocity.y *= scale;
 }
