@@ -19,6 +19,7 @@ import {
   type ServerEvent,
   type SessionUser
 } from "@pong-pong/shared";
+import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
 
 type Client = {
   id: string;
@@ -44,6 +45,7 @@ type Room = {
   tournamentMatchId: string | null;
   npcUser: PublicUser | null;
   aiTargetY: number;
+  simulation: PongSimulationState;
 };
 
 const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
@@ -275,6 +277,7 @@ export class GameHub {
     const roomId = randomUUID();
     const npcUser = options.npc ?? null;
     const rightPlayer = right?.user ?? npcUser;
+    const simulation = PongSimulation.initialState();
     const room: Room = {
       id: roomId,
       clients: { left, ...(right ? { right } : {}) },
@@ -285,6 +288,7 @@ export class GameHub {
       tournamentMatchId: options.tournamentMatchId ?? null,
       npcUser,
       aiTargetY: GAME_HEIGHT / 2,
+      simulation,
       snapshot: {
         roomId,
         phase: "waiting",
@@ -292,12 +296,12 @@ export class GameHub {
         leftScore: 0,
         rightScore: 0,
         paddles: {
-          left: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 },
-          right: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 }
+          left: { y: simulation.paddles.left.y, dy: simulation.paddles.left.direction },
+          right: { y: simulation.paddles.right.y, dy: simulation.paddles.right.direction }
         },
         ball: {
-          position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
-          velocity: { x: INITIAL_BALL_VELOCITY.x, y: INITIAL_BALL_VELOCITY.y }
+          position: { ...simulation.ball.position },
+          velocity: { ...simulation.ball.velocity }
         },
         players: [
           { id: left.user.id, handle: left.user.handle, displayName: left.user.displayName, side: "left", ready: false, ai: false },
