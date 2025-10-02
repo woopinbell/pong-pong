@@ -19,6 +19,7 @@ import {
   type ServerEvent,
   type SessionUser
 } from "@pong-pong/shared";
+import { PongAi } from "./game/pongAi";
 import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
 
 type Client = {
@@ -46,6 +47,7 @@ type Room = {
   npcUser: PublicUser | null;
   aiTargetY: number;
   simulation: PongSimulationState;
+  aiController: PongAi | null;
 };
 
 const INITIAL_BALL_VELOCITY = { x: 10, y: 5 };
@@ -290,6 +292,7 @@ export class GameHub {
       npcUser,
       aiTargetY: GAME_HEIGHT / 2,
       simulation,
+      aiController: options.ai ? new PongAi(roomId, npcUser?.rating ?? 1200) : null,
       snapshot: {
         roomId,
         phase: "waiting",
@@ -375,12 +378,12 @@ export class GameHub {
 
   private async tick(room: Room): Promise<void> {
     if (room.snapshot.phase !== "playing") return;
-    if (room.ai) {
-      updateAiPaddleIntent(room);
-    }
+    const rightDirection = room.aiController
+      ? room.aiController.nextDirection(room.simulation)
+      : room.snapshot.paddles.right.dy;
     room.simulation = PongSimulation.step(room.simulation, {
       left: room.snapshot.paddles.left.dy,
-      right: room.snapshot.paddles.right.dy
+      right: rightDirection
     }, SIMULATION_TIMESTEP_MS);
     syncSnapshot(room);
     this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: room.snapshot });
