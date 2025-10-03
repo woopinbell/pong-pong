@@ -183,6 +183,12 @@ export const adminStatusBodySchema = z.object({
   reason: z.string().trim().min(1).max(240).optional()
 }).strict();
 
+export const wsTicketSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+export const wsHandshakeQuerySchema = z.object({
+  ticket: wsTicketSchema,
+  v: z.literal("1")
+}).strict();
+
 export const okResponseSchema = z.object({ ok: z.literal(true) });
 export const healthResponseSchema = z.object({ ok: z.literal(true), service: z.literal("pong-pong-api") });
 export const userResponseSchema = z.object({ user: sessionUserSchema });
@@ -198,7 +204,7 @@ export const tournamentResponseSchema = z.object({ tournament: tournamentSummary
 export const adminUsersResponseSchema = z.object({ users: z.array(publicUserSchema) });
 export const adminActionsResponseSchema = z.object({ actions: z.array(adminActionSummarySchema) });
 export const wsTicketResponseSchema = z.object({
-  ticket: z.string().min(32),
+  ticket: wsTicketSchema,
   expiresInSeconds: z.literal(30),
   protocolVersion: z.literal(1)
 });
