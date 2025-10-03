@@ -7,7 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
 import { StatCard } from "@/components/StatCard";
-import { getLobby, getMe, getToken, sendLobbyChat } from "@/lib/api";
+import { getLobby, getMe, requestWsTicket, sendLobbyChat } from "@/lib/api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
@@ -36,24 +36,38 @@ export default function HomePage() {
   }, [loadLobby]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!userId || !token) return;
-    const socket = new WebSocket(`${WS_URL}?session=${token}`);
-    socketRef.current = socket;
-    socket.onmessage = (event) => {
-      const message = JSON.parse(event.data) as ServerEvent;
-      if (message.type === "chat.message" && message.message.scope === "lobby") {
-        setChat((current) => [...current.filter((item) => item.id !== message.message.id).slice(-19), message.message]);
-      }
-      if (message.type === "presence.changed") {
-        loadLobby().catch(() => setNotice("로비 지표를 갱신하지 못했습니다."));
-      }
-      if (message.type === "error") setNotice(message.message);
-    };
-    socket.onclose = () => {
-      if (socketRef.current === socket) socketRef.current = null;
-    };
+    if (!userId) return;
+    let cancelled = false;
+    let socket: WebSocket | null = null;
+    const controller = new AbortController();
+
+    requestWsTicket(controller.signal)
+      .then(({ ticket, protocolVersion }) => {
+        if (cancelled) return;
+        socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(ticket)}&v=${protocolVersion}`);
+        socketRef.current = socket;
+        socket.onmessage = (event) => {
+          const message = JSON.parse(event.data) as ServerEvent;
+          if (message.type === "chat.message" && message.message.scope === "lobby") {
+            setChat((current) => [...current.filter((item) => item.id !== message.message.id).slice(-19), message.message]);
+          }
+          if (message.type === "presence.changed") {
+            loadLobby().catch(() => setNotice("로비 지표를 갱신하지 못했습니다."));
+          }
+          if (message.type === "error") setNotice(message.message);
+        };
+        socket.onclose = () => {
+          if (socketRef.current === socket) socketRef.current = null;
+        };
+      })
+      .catch(() => {
+        if (!cancelled) setNotice("실시간 연결을 준비하지 못했습니다.");
+      });
+
     return () => {
+      cancelled = true;
+      controller.abort();
+      if (!socket) return;
       socket.onclose = null;
       socket.onmessage = null;
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();

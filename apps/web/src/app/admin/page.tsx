@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Shield } from "lucide-react";
 import type { AdminActionSummary, PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
-import { apiFetch, getAdminActions, setUserStatus } from "@/lib/api";
+import { getAdminActions, getAdminUsers, setUserStatus } from "@/lib/api";
 
 export default function AdminPage() {
   const [users, setUsers] = useState<PublicUser[]>([]);
@@ -13,9 +13,9 @@ export default function AdminPage() {
   const [message, setMessage] = useState("운영자 계정으로 로그인하면 상태 변경이 저장됩니다.");
 
   useEffect(() => {
-    Promise.all([apiFetch<{ users: PublicUser[] }>("/admin/users"), getAdminActions()])
-      .then(([result, actionItems]) => {
-        setUsers(result.users);
+    Promise.all([getAdminUsers(), getAdminActions()])
+      .then(([userItems, actionItems]) => {
+        setUsers(userItems);
         setActions(actionItems);
         setMessage("사용자 목록과 감사 로그를 불러왔습니다.");
       })

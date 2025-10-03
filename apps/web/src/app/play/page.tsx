@@ -5,7 +5,7 @@ import { MessageCircle, Pause, Play, Send, Signal, Users } from "lucide-react";
 import type { GameSnapshot, ServerEvent } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { PongCanvas } from "@/components/PongCanvas";
-import { getToken } from "@/lib/api";
+import { requestWsTicket } from "@/lib/api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
@@ -16,6 +16,7 @@ export default function PlayPage() {
   const [messages, setMessages] = useState<string[]>([]);
   const [chatInput, setChatInput] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
+  const ticketRequestRef = useRef<AbortController | null>(null);
   const directionRef = useRef<-1 | 0 | 1>(0);
 
   const score = useMemo(() => (snapshot ? `${snapshot.leftScore} - ${snapshot.rightScore}` : "경기 전"), [snapshot]);
@@ -94,19 +95,29 @@ export default function PlayPage() {
     openGameSocket("토너먼트 경기 상대 입장 대기 중", { type: "tournament.join", matchId });
   }
 
-  function openGameSocket(openStatus: string, payload: Record<string, unknown>) {
-    const token = getToken();
-    if (!token) {
-      setStatus("로그인 후 이용할 수 있습니다.");
-      return;
-    }
+  async function openGameSocket(openStatus: string, payload: Record<string, unknown>) {
     closeCurrentSocket();
     setRoomId(null);
     setSnapshot(null);
     setMessages([]);
     setChatInput("");
     directionRef.current = 0;
-    const socket = new WebSocket(`${WS_URL}?session=${token}`);
+    setStatus("실시간 연결 준비 중");
+    const controller = new AbortController();
+    ticketRequestRef.current = controller;
+    let ticketResponse;
+    try {
+      ticketResponse = await requestWsTicket(controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) setStatus("로그인 후 이용할 수 있습니다.");
+      return;
+    } finally {
+      if (ticketRequestRef.current === controller) ticketRequestRef.current = null;
+    }
+    if (controller.signal.aborted) return;
+    const socket = new WebSocket(
+      `${WS_URL}?ticket=${encodeURIComponent(ticketResponse.ticket)}&v=${ticketResponse.protocolVersion}`
+    );
     socketRef.current = socket;
     socket.onopen = () => {
       setStatus(openStatus);
@@ -169,6 +180,8 @@ export default function PlayPage() {
   }
 
   function closeCurrentSocket() {
+    ticketRequestRef.current?.abort();
+    ticketRequestRef.current = null;
     const socket = socketRef.current;
     if (!socket) return;
     socket.onclose = null;
