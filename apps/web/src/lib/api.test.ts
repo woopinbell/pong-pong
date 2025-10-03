@@ -4,10 +4,21 @@ import {
   ApiError,
   SESSION_EXPIRED_EVENT,
   apiFetch,
+  createTournament,
   devLogin,
+  getAdminActions,
+  getAdminUsers,
+  getDashboard,
   getLeaderboard,
+  getLobby,
   getMe,
-  sendLobbyChat
+  getProfile,
+  getTournaments,
+  joinTournament,
+  requestFriend,
+  requestWsTicket,
+  sendLobbyChat,
+  setUserStatus
 } from "./api";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
@@ -88,6 +99,12 @@ describe("apiFetch", () => {
     expect(new Headers(init.headers).get("content-type")).toBe("text/plain");
   });
 
+  it("rejects a successful response that violates its shared schema", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: false }));
+
+    await expect(apiFetch("/resource", okResponseSchema)).rejects.toMatchObject({ name: "ZodError" });
+  });
+
   it("throws the structured API error returned by the server", async () => {
     fetchMock.mockResolvedValue(jsonResponse({
       error: {
@@ -98,7 +115,9 @@ describe("apiFetch", () => {
       }
     }, { status: 400 }));
 
-    await expect(apiFetch("/failure", okResponseSchema)).rejects.toMatchObject({
+    const request = apiFetch("/failure", okResponseSchema);
+
+    await expect(request).rejects.toMatchObject({
       name: "ApiError",
       status: 400,
       code: "INVALID_REQUEST",
@@ -139,6 +158,19 @@ describe("apiFetch", () => {
     await expect(apiFetch("/me", okResponseSchema)).rejects.toBeInstanceOf(ApiError);
     expect(dispatchEvent).toHaveBeenCalledOnce();
     expect(dispatchEvent.mock.calls[0][0]).toMatchObject({ type: SESSION_EXPIRED_EVENT });
+  });
+
+  it("passes AbortSignal through to fetch and preserves cancellation", async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }));
+
+    const request = apiFetch("/slow", okResponseSchema, { signal: controller.signal });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: "AbortError" });
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
   });
 });
 
@@ -188,6 +220,22 @@ describe("API endpoint helpers", () => {
     await expect(getMe()).rejects.toMatchObject({ status: 503, code: "UNAVAILABLE" });
   });
 
+  it("requests and validates a one-time websocket ticket", async () => {
+    const ticketResponse = {
+      ticket: "a".repeat(43),
+      expiresInSeconds: 30,
+      protocolVersion: 1
+    } as const;
+    const controller = new AbortController();
+    fetchMock.mockResolvedValue(jsonResponse(ticketResponse));
+
+    await expect(requestWsTicket(controller.signal)).resolves.toEqual(ticketResponse);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:4000/auth/ws-ticket");
+    expect(init).toMatchObject({ method: "POST", credentials: "include", signal: controller.signal });
+  });
+
   it("extracts endpoint payloads from their validated response envelopes", async () => {
     const leaderboardEntry = { rank: 1, user: publicUser, winRate: 60 };
     const chatMessage = {
@@ -208,5 +256,36 @@ describe("API endpoint helpers", () => {
     const [chatUrl, chatInit] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(chatUrl).toBe("http://localhost:4000/chat/lobby");
     expect(chatInit).toMatchObject({ method: "POST", body: JSON.stringify({ body: "안녕하세요" }) });
+  });
+
+  it("forwards cancellation from endpoint helpers", async () => {
+    const controller = new AbortController();
+    fetchMock.mockResolvedValue(jsonResponse({ entries: [] }));
+
+    await getLeaderboard(controller.signal);
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it.each([
+    { name: "devLogin", call: () => devLogin("tester", "테스터") },
+    { name: "getMe", call: () => getMe() },
+    { name: "getLobby", call: () => getLobby() },
+    { name: "sendLobbyChat", call: () => sendLobbyChat("안녕하세요") },
+    { name: "getDashboard", call: () => getDashboard() },
+    { name: "getLeaderboard", call: () => getLeaderboard() },
+    { name: "getTournaments", call: () => getTournaments() },
+    { name: "createTournament", call: () => createTournament("주간 컵") },
+    { name: "joinTournament", call: () => joinTournament(ITEM_ID) },
+    { name: "getProfile", call: () => getProfile("tester") },
+    { name: "requestFriend", call: () => requestFriend("friend") },
+    { name: "getAdminUsers", call: () => getAdminUsers() },
+    { name: "getAdminActions", call: () => getAdminActions() },
+    { name: "setUserStatus", call: () => setUserStatus(USER_ID, "banned", "검토") },
+    { name: "requestWsTicket", call: () => requestWsTicket() }
+  ])("validates $name responses with its shared schema", async ({ call }) => {
+    fetchMock.mockResolvedValue(jsonResponse({}));
+
+    await expect(call()).rejects.toMatchObject({ name: "ZodError" });
   });
 });
