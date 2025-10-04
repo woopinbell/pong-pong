@@ -60,6 +60,8 @@ export interface AppRepository {
   createSession(userId: string): Promise<string>;
   getSessionUser(token: string | undefined): Promise<SessionUser | null>;
   deleteSession(token: string | undefined): Promise<void>;
+  createWsTicket(input: CreateWsTicketInput): Promise<void>;
+  consumeWsTicket(ticketHash: string): Promise<SessionUser | null>;
   setUserRoleByHandle(handle: string, role: UserRole): Promise<PublicUser>;
   getUserById(id: string): Promise<PublicUser | null>;
   getUserByHandle(handle: string): Promise<PublicUser | null>;
@@ -467,6 +469,7 @@ class PostgresRepository implements AppRepository {
 class MemoryRepository implements AppRepository {
   private readonly users = new Map<string, MemoryUserRow>();
   private readonly sessions = new Map<string, string>();
+  private readonly wsTickets = new Map<string, { userId: string; expiresAt: number }>();
   private readonly matches: MemoryMatchRecord[] = [];
   private readonly friendships: FriendSummary[] = [];
   private readonly chats: ChatMessage[] = [];
@@ -541,6 +544,25 @@ class MemoryRepository implements AppRepository {
 
   async deleteSession(token: string | undefined): Promise<void> {
     if (token) this.sessions.delete(token);
+  }
+
+  async createWsTicket(input: CreateWsTicketInput): Promise<void> {
+    assertWsTicketHash(input.ticketHash);
+    assertTicketTtl(input.ttlSeconds);
+    this.wsTickets.set(input.ticketHash, {
+      userId: input.userId,
+      expiresAt: Date.now() + input.ttlSeconds * 1_000
+    });
+  }
+
+  async consumeWsTicket(ticketHash: string): Promise<SessionUser | null> {
+    assertWsTicketHash(ticketHash);
+    const ticket = this.wsTickets.get(ticketHash);
+    if (!ticket) return null;
+    this.wsTickets.delete(ticketHash);
+    const user = this.users.get(ticket.userId);
+    if (!user || ticket.expiresAt <= Date.now() || user.status !== "active") return null;
+    return toSessionUser(user, true);
   }
 
   async setUserRoleByHandle(handle: string, role: UserRole): Promise<PublicUser> {
