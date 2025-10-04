@@ -5,7 +5,7 @@ import Fastify, { type FastifyRequest } from "fastify";
 import type { AppRepository } from "@pong-pong/db";
 import * as http from "@pong-pong/shared";
 import type { SessionUser } from "@pong-pong/shared";
-import type { WebSocket } from "ws";
+import { WebSocket, type RawData } from "ws";
 import { GameHub } from "./gameHub";
 import {
   forbidden,
@@ -16,6 +16,13 @@ import {
   suspended,
   unauthorized
 } from "./httpBoundary";
+import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket";
+
+const WS_POLICY_VIOLATION = 1008;
+const WS_MESSAGE_TOO_BIG = 1009;
+const PRE_AUTH_MESSAGE_MAX_BYTES = 8 * 1024;
+const PRE_AUTH_MESSAGE_MAX_COUNT = 16;
+const PRE_AUTH_BUFFER_MAX_BYTES = 32 * 1024;
 
 export type AppMode = "development" | "test" | "production" | "demo";
 
@@ -41,22 +48,57 @@ export function buildApp({ repo, webOrigin, appMode = readAppMode() }: BuildAppO
     await realtime.register(websocket);
     realtime.get("/ws", { websocket: true }, (socket, request) => {
       const pendingPayloads: string[] = [];
-      const bufferPayload = (payload: Buffer) => pendingPayloads.push(payload.toString());
+      let pendingBytes = 0;
+      let authenticationClosed = false;
+      const closeAuthentication = (code: number, reason: string) => {
+        if (authenticationClosed) return;
+        authenticationClosed = true;
+        socket.off("message", bufferPayload);
+        socket.close(code, reason);
+      };
+      const bufferPayload = (payload: RawData) => {
+        if (authenticationClosed) return;
+        const buffer = rawDataToBuffer(payload);
+        if (buffer.byteLength > PRE_AUTH_MESSAGE_MAX_BYTES) {
+          closeAuthentication(WS_MESSAGE_TOO_BIG, "pre-auth payload too large");
+          return;
+        }
+        if (
+          pendingPayloads.length >= PRE_AUTH_MESSAGE_MAX_COUNT
+          || pendingBytes + buffer.byteLength > PRE_AUTH_BUFFER_MAX_BYTES
+        ) {
+          closeAuthentication(WS_MESSAGE_TOO_BIG, "pre-auth buffer limit exceeded");
+          return;
+        }
+        pendingBytes += buffer.byteLength;
+        pendingPayloads.push(buffer.toString("utf8"));
+      };
       socket.on("message", bufferPayload);
-      currentUser(repo, request)
+
+      const query = request.query as Record<string, unknown>;
+      if (query?.v !== "1") {
+        closeAuthentication(WS_POLICY_VIOLATION, "unsupported websocket version");
+        return;
+      }
+      const parsedQuery = http.wsHandshakeQuerySchema.safeParse(query);
+      if (!parsedQuery.success) {
+        closeAuthentication(WS_POLICY_VIOLATION, "invalid websocket ticket");
+        return;
+      }
+
+      repo.consumeWsTicket(hashWsTicket(parsedQuery.data.ticket))
         .then((user) => {
           if (!user) {
-            socket.close(1008, "unauthorized");
+            closeAuthentication(WS_POLICY_VIOLATION, "invalid websocket ticket");
             return;
           }
-          if (user.status !== "active") {
-            socket.close(1008, "account suspended");
+          if (authenticationClosed || socket.readyState !== WebSocket.OPEN) {
             return;
           }
           socket.off("message", bufferPayload);
           hub.connect(socket as WebSocket, request.raw, user, pendingPayloads);
         })
-        .catch(() => socket.close(1011, "authentication failed"));
+        .catch(() => closeAuthentication(1011, "websocket authentication failed"));
     });
   });
 
@@ -85,6 +127,25 @@ export function buildApp({ repo, webOrigin, appMode = readAppMode() }: BuildAppO
     await repo.deleteSession(readSessionToken(request));
     reply.clearCookie("pp_session", { path: "/" });
     return parseOutput(http.okResponseSchema, { ok: true });
+  });
+
+  app.post("/auth/ws-ticket", async (request) => {
+    parseInput(http.emptyParamsSchema, request.body ?? {});
+    const user = await currentUser(repo, request);
+    if (!user) unauthorized();
+    if (!isActive(user)) suspended();
+
+    const ticket = createRawWsTicket();
+    await repo.createWsTicket({
+      userId: user.id,
+      ticketHash: hashWsTicket(ticket),
+      ttlSeconds: WS_TICKET_TTL_SECONDS
+    });
+    return parseOutput(http.wsTicketResponseSchema, {
+      ticket,
+      expiresInSeconds: WS_TICKET_TTL_SECONDS,
+      protocolVersion: 1
+    });
   });
 
   app.get("/me", async (request) => {
@@ -274,4 +335,10 @@ function readAppMode(input = process.env): AppMode {
 
 function useSecureCookies(mode: AppMode): boolean {
   return mode === "production" || mode === "demo";
+}
+
+function rawDataToBuffer(payload: RawData): Buffer {
+  if (Array.isArray(payload)) return Buffer.concat(payload);
+  if (payload instanceof ArrayBuffer) return Buffer.from(payload);
+  return Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
 }
