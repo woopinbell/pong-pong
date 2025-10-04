@@ -24,6 +24,13 @@ export interface SessionTable {
   created_at: Generated<Date>;
 }
 
+export interface WsTicketTable {
+  ticket_hash: string;
+  user_id: string;
+  expires_at: Date;
+  created_at: Generated<Date>;
+}
+
 export interface MatchTable {
   id: Generated<string>;
   mode: import("@pong-pong/shared").MatchMode;
@@ -103,6 +110,7 @@ export type AdminActionRow = Selectable<AdminActionTable>;
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
+  ws_tickets: WsTicketTable;
   matches: MatchTable;
   friendships: FriendshipTable;
   chat_messages: ChatMessageTable;

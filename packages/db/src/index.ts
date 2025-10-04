@@ -13,6 +13,12 @@ export interface DevLoginInput {
   email?: string | null;
 }
 
+export interface CreateWsTicketInput {
+  userId: string;
+  ticketHash: string;
+  ttlSeconds: number;
+}
+
 export type SeedProfile = "development" | "demo";
 
 type NpcSeed = { handle: string; displayName: string; rating: number; avatarKey: string };
@@ -175,6 +181,36 @@ class PostgresRepository implements AppRepository {
   async deleteSession(token: string | undefined): Promise<void> {
     if (!token) return;
     await sql`delete from sessions where token = ${token}`.execute(this.db);
+  }
+
+  async createWsTicket(input: CreateWsTicketInput): Promise<void> {
+    assertWsTicketHash(input.ticketHash);
+    assertTicketTtl(input.ttlSeconds);
+    await sql`
+      insert into ws_tickets (ticket_hash, user_id, expires_at)
+      values (
+        ${input.ticketHash},
+        ${input.userId},
+        now() + (${input.ttlSeconds} * interval '1 second')
+      )
+    `.execute(this.db);
+  }
+
+  async consumeWsTicket(ticketHash: string): Promise<SessionUser | null> {
+    assertWsTicketHash(ticketHash);
+    const result = await sql<UserRow>`
+      with consumed as (
+        delete from ws_tickets
+        where ticket_hash = ${ticketHash}
+        returning user_id, expires_at
+      )
+      select u.*
+      from consumed c
+      join users u on u.id = c.user_id
+      where c.expires_at > now() and u.status = 'active'
+      limit 1
+    `.execute(this.db);
+    return result.rows[0] ? toSessionUser(result.rows[0], true) : null;
   }
 
   async setUserRoleByHandle(handle: string, role: UserRole): Promise<PublicUser> {
@@ -696,6 +732,18 @@ function firstRow<T>(result: { rows: T[] }): T {
 
 function normalizeHandle(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "player";
+}
+
+function assertWsTicketHash(value: string): void {
+  if (!/^[a-f0-9]{64}$/.test(value)) {
+    throw new Error("invalid websocket ticket hash");
+  }
+}
+
+function assertTicketTtl(value: number): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error("invalid websocket ticket ttl");
+  }
 }
 
 function avatarFor(handle: string): string {
