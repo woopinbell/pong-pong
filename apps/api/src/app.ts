@@ -16,6 +16,7 @@ import {
   suspended,
   unauthorized
 } from "./httpBoundary";
+import { createLoggerOptions } from "./requestLogging";
 import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket";
 
 const WS_POLICY_VIOLATION = 1008;
@@ -33,7 +34,7 @@ export interface BuildAppOptions {
 }
 
 export function buildApp({ repo, webOrigin, appMode = readAppMode() }: BuildAppOptions) {
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+  const app = Fastify({ logger: createLoggerOptions(process.env.LOG_LEVEL ?? "info") });
   const hub = new GameHub(repo);
 
   installHttpErrorBoundary(app);
