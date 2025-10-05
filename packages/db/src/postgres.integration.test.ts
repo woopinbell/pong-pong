@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
@@ -61,10 +61,11 @@ describe("PostgreSQL integration", () => {
         "tournament_entries",
         "tournament_matches",
         "tournaments",
-        "users"
+        "users",
+        "ws_tickets"
       ]));
       const firstMigrations = await appliedMigrations(pool);
-      expect(firstMigrations).toEqual(["001_initial"]);
+      expect(firstMigrations).toEqual(["001_initial", "002_ws_tickets"]);
 
       await migrateDatabase(databaseUrl);
 
@@ -130,6 +131,53 @@ describe("PostgreSQL integration", () => {
 
       const promoted = await repository.setUserRoleByHandle("admin", "admin");
       expect(promoted.role).toBe("admin");
+    });
+  });
+
+  it("stores only ticket hashes and consumes a ticket atomically once", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const user = await repository.upsertDevUser({
+        handle: "ws-ticket-user",
+        displayName: "WS Ticket User"
+      });
+      const rawTicket = randomBytes(32).toString("base64url");
+      const ticketHash = createHash("sha256").update(rawTicket, "utf8").digest("hex");
+
+      await repository.createWsTicket({
+        userId: user.id,
+        ticketHash,
+        ttlSeconds: 30
+      });
+
+      const columns = await pool.query<{ column_name: string }>(
+        "select column_name from information_schema.columns where table_schema = current_schema() and table_name = 'ws_tickets' order by column_name"
+      );
+      expect(columns.rows.map((row) => row.column_name)).toEqual([
+        "created_at",
+        "expires_at",
+        "ticket_hash",
+        "user_id"
+      ]);
+      const stored = await pool.query<{ ticket_hash: string; ttl_seconds: number }>(
+        "select ticket_hash, extract(epoch from expires_at - created_at)::integer as ttl_seconds from ws_tickets"
+      );
+      expect(stored.rows).toEqual([{ ticket_hash: ticketHash, ttl_seconds: 30 }]);
+      expect(JSON.stringify(stored.rows)).not.toContain(rawTicket);
+
+      const attempts = await Promise.all(
+        Array.from({ length: 20 }, () => repository.consumeWsTicket(ticketHash))
+      );
+      const successful = attempts.filter((result) => result !== null);
+      expect(successful).toHaveLength(1);
+      expect(successful[0]?.id).toBe(user.id);
+      await expect(repository.consumeWsTicket(ticketHash)).resolves.toBeNull();
+
+      const remaining = await pool.query<{ count: number }>(
+        "select count(*)::integer as count from ws_tickets"
+      );
+      expect(remaining.rows[0]?.count).toBe(0);
     });
   });
 

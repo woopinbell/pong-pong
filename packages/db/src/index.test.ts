@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { createMemoryRepository } from "./index";
 
@@ -87,4 +88,32 @@ describe("memory repository", () => {
     expect(final?.right?.id).toBe(p2.id);
     expect((await repo.listTournaments())[0].name).toBe("테스트 컵");
   });
+
+  it("consumes websocket tickets once and rejects expired or suspended users", async () => {
+    const repo = createMemoryRepository();
+    const user = await repo.upsertDevUser({ handle: "ws-user", displayName: "WS 사용자" });
+    const ticketHash = newTicketHash();
+    await repo.createWsTicket({ userId: user.id, ticketHash, ttlSeconds: 30 });
+
+    const attempts = await Promise.all([
+      repo.consumeWsTicket(ticketHash),
+      repo.consumeWsTicket(ticketHash)
+    ]);
+    expect(attempts.filter((result) => result !== null)).toHaveLength(1);
+    await expect(repo.consumeWsTicket(ticketHash)).resolves.toBeNull();
+
+    const expiredHash = newTicketHash();
+    await repo.createWsTicket({ userId: user.id, ticketHash: expiredHash, ttlSeconds: 0 });
+    await expect(repo.consumeWsTicket(expiredHash)).resolves.toBeNull();
+
+    const suspendedHash = newTicketHash();
+    await repo.createWsTicket({ userId: user.id, ticketHash: suspendedHash, ttlSeconds: 30 });
+    await repo.setUserBan(user.id, user.id, true, "ticket test");
+    await expect(repo.consumeWsTicket(suspendedHash)).resolves.toBeNull();
+  });
 });
+
+function newTicketHash(): string {
+  const rawTicket = randomBytes(32).toString("base64url");
+  return createHash("sha256").update(rawTicket, "utf8").digest("hex");
+}

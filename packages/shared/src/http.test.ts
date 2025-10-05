@@ -6,6 +6,7 @@ import {
   idParamsSchema,
   profileUpdateBodySchema,
   sessionUserSchema,
+  wsHandshakeQuerySchema,
   wsTicketResponseSchema
 } from "./http";
 
@@ -76,5 +77,14 @@ describe("HTTP contracts", () => {
 
     expect(wsTicketResponseSchema.parse(response)).toEqual(response);
     expect(wsTicketResponseSchema.safeParse({ ...response, protocolVersion: 2 }).success).toBe(false);
+  });
+
+  it("accepts only a one-time ticket and protocol v1 in websocket query parameters", () => {
+    const query = { ticket: "a".repeat(43), v: "1" } as const;
+
+    expect(wsHandshakeQuerySchema.parse(query)).toEqual(query);
+    expect(wsHandshakeQuerySchema.safeParse({ ...query, v: "2" }).success).toBe(false);
+    expect(wsHandshakeQuerySchema.safeParse({ ...query, session: "long-session" }).success).toBe(false);
+    expect(wsHandshakeQuerySchema.safeParse({ v: "1" }).success).toBe(false);
   });
 });
