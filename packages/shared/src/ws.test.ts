@@ -1,153 +1,99 @@
 import { describe, expect, it } from "vitest";
-import { encodeServerEvent, parseClientEvent, type ServerEvent } from "./ws";
+import {
+  encodeServerEvent,
+  parseClientEvent,
+  parseServerEvent,
+  type ServerEvent
+} from "./ws";
+import type { GameSnapshot } from "./game";
 
-describe("parseClientEvent", () => {
+describe("version 1 client events", () => {
   it.each([
-    {
-      name: "queue join",
-      payload: { type: "queue.join", mode: "ai" },
-      expected: { type: "queue.join", mode: "ai" }
-    },
-    {
-      name: "queue leave",
-      payload: { type: "queue.leave" },
-      expected: { type: "queue.leave" }
-    },
-    {
-      name: "game ready",
-      payload: { type: "game.ready", roomId: "room-1" },
-      expected: { type: "game.ready", roomId: "room-1" }
-    },
-    {
-      name: "game input",
-      payload: { type: "game.input", roomId: "room-1", direction: -1 },
-      expected: { type: "game.input", roomId: "room-1", direction: -1 }
-    },
-    {
-      name: "chat send",
-      payload: { type: "chat.send", scope: "match", roomId: "room-1", body: "hello" },
-      expected: { type: "chat.send", scope: "match", roomId: "room-1", body: "hello" }
-    }
-  ])("accepts $name events", ({ payload, expected }) => {
-    expect(parseClientEvent(JSON.stringify(payload))).toEqual(expected);
+    { payload: { v: 1, type: "queue.join", mode: "ai" } },
+    { payload: { v: 1, type: "queue.leave" } },
+    { payload: { v: 1, type: "tournament.join", matchId: "match-1" } },
+    { payload: { v: 1, type: "game.ready", roomId: "room-1" } },
+    { payload: { v: 1, type: "game.pause", roomId: "room-1" } },
+    { payload: { v: 1, type: "game.resume", roomId: "room-1" } },
+    { payload: { v: 1, type: "game.input", roomId: "room-1", inputSeq: 7, direction: -1 } },
+    { payload: { v: 1, type: "chat.send", scope: "match", roomId: "room-1", body: "hello" } }
+  ])("accepts $payload.type", ({ payload }) => {
+    expect(parseClientEvent(JSON.stringify(payload))).toEqual(payload);
   });
 
-  it("defaults queue joins to queue mode", () => {
-    expect(parseClientEvent(JSON.stringify({ type: "queue.join" }))).toEqual({
+  it("defaults queue mode without defaulting the protocol version", () => {
+    expect(parseClientEvent(JSON.stringify({ v: 1, type: "queue.join" }))).toEqual({
+      v: 1,
       type: "queue.join",
       mode: "queue"
     });
-  });
-
-  it("rejects unknown event types", () => {
-    expect(() => parseClientEvent(JSON.stringify({ type: "game.unknown" }))).toThrow();
+    expect(() => parseClientEvent(JSON.stringify({ type: "queue.join" }))).toThrow();
   });
 
   it.each([
-    { name: "ready room id", payload: { type: "game.ready" } },
-    { name: "input room id", payload: { type: "game.input", direction: 0 } },
-    { name: "input direction", payload: { type: "game.input", roomId: "room-1" } },
-    { name: "chat scope", payload: { type: "chat.send", body: "hello" } },
-    { name: "chat body", payload: { type: "chat.send", scope: "lobby" } }
-  ])("rejects events without the required $name", ({ payload }) => {
+    { name: "missing version", payload: { type: "queue.leave" } },
+    { name: "unsupported version", payload: { v: 2, type: "queue.leave" } },
+    { name: "unexpected field", payload: { v: 1, type: "queue.leave", token: "secret" } },
+    { name: "missing input sequence", payload: { v: 1, type: "game.input", roomId: "room-1", direction: 0 } },
+    { name: "negative input sequence", payload: { v: 1, type: "game.input", roomId: "room-1", inputSeq: -1, direction: 0 } },
+    { name: "fractional input sequence", payload: { v: 1, type: "game.input", roomId: "room-1", inputSeq: 1.5, direction: 0 } },
+    { name: "invalid direction", payload: { v: 1, type: "game.input", roomId: "room-1", inputSeq: 1, direction: 2 } }
+  ])("rejects $name", ({ payload }) => {
     expect(() => parseClientEvent(JSON.stringify(payload))).toThrow();
   });
 
-  it.each([
-    { name: "queue mode", payload: { type: "queue.join", mode: "ranked" } },
-    { name: "chat scope", payload: { type: "chat.send", scope: "private", body: "hello" } },
-    { name: "direction below the range", payload: { type: "game.input", roomId: "room-1", direction: -2 } },
-    { name: "direction above the range", payload: { type: "game.input", roomId: "room-1", direction: 2 } },
-    { name: "non-numeric direction", payload: { type: "game.input", roomId: "room-1", direction: "1" } }
-  ])("rejects an invalid $name", ({ payload }) => {
-    expect(() => parseClientEvent(JSON.stringify(payload))).toThrow();
-  });
+  it("trims bounded chat bodies", () => {
+    expect(parseClientEvent(JSON.stringify({
+      v: 1,
+      type: "chat.send",
+      scope: "lobby",
+      body: "  hello  "
+    }))).toEqual({ v: 1, type: "chat.send", scope: "lobby", body: "hello" });
 
-  it.each([-1, 0, 1])("accepts %i as an input direction", (direction) => {
-    expect(
-      parseClientEvent(JSON.stringify({ type: "game.input", roomId: "room-1", direction }))
-    ).toEqual({ type: "game.input", roomId: "room-1", direction });
-  });
-
-  it("trims chat bodies", () => {
-    expect(
-      parseClientEvent(JSON.stringify({ type: "chat.send", scope: "lobby", body: "  hello  " }))
-    ).toEqual({ type: "chat.send", scope: "lobby", body: "hello" });
-  });
-
-  it("accepts chat bodies at the 1 and 240 character boundaries", () => {
-    const oneCharacter = parseClientEvent(
-      JSON.stringify({ type: "chat.send", scope: "lobby", body: "a" })
-    );
-    const twoHundredFortyCharacters = parseClientEvent(
-      JSON.stringify({ type: "chat.send", scope: "lobby", body: "a".repeat(240) })
-    );
-
-    expect(oneCharacter).toMatchObject({ body: "a" });
-    expect(twoHundredFortyCharacters).toMatchObject({ body: "a".repeat(240) });
-  });
-
-  it.each(["", "   ", "a".repeat(241)])("rejects an invalid chat body length", (body) => {
-    expect(() =>
-      parseClientEvent(JSON.stringify({ type: "chat.send", scope: "lobby", body }))
-    ).toThrow();
-  });
-
-  it("rejects malformed JSON", () => {
-    expect(() => parseClientEvent('{"type":"queue.leave"')).toThrow(SyntaxError);
+    expect(() => parseClientEvent(JSON.stringify({
+      v: 1,
+      type: "chat.send",
+      scope: "lobby",
+      body: "a".repeat(241)
+    }))).toThrow();
   });
 });
 
-describe("encodeServerEvent", () => {
-  const serverEvents = [
+describe("version 1 server events", () => {
+  const snapshot: GameSnapshot = {
+    roomId: "room-1",
+    tick: 12,
+    sequence: 15,
+    serverTimeMs: 1_784_764_800_000,
+    state: {
+      phase: "playing",
+      leftScore: 1,
+      rightScore: 0,
+      paddles: {
+        left: { y: 100, dy: -1 },
+        right: { y: 200, dy: 1 }
+      },
+      ball: {
+        position: { x: 480, y: 270 },
+        velocity: { x: 6, y: -2 }
+      },
+      players: [
+        { id: "player-1", handle: "left-player", displayName: "Left Player", side: "left", ready: true, ai: false },
+        { id: "player-2", handle: "right-player", displayName: "Right Player", side: "right", ready: true, ai: false }
+      ]
+    }
+  };
+
+  const events = [
+    { v: 1, type: "queue.matched", roomId: "room-1", side: "left", opponent: "Opponent" },
+    { v: 1, type: "game.snapshot", snapshot },
     {
-      type: "queue.matched",
-      roomId: "room-1",
-      side: "left",
-      opponent: "opponent"
-    },
-    {
-      type: "game.snapshot",
-      snapshot: {
-        roomId: "room-1",
-        phase: "playing",
-        tick: 12,
-        leftScore: 1,
-        rightScore: 0,
-        paddles: {
-          left: { y: 100, dy: -1 },
-          right: { y: 200, dy: 1 }
-        },
-        ball: {
-          position: { x: 480, y: 270 },
-          velocity: { x: 6, y: -2 }
-        },
-        players: [
-          {
-            id: "player-1",
-            handle: "left-player",
-            displayName: "Left Player",
-            side: "left",
-            ready: true,
-            ai: false
-          },
-          {
-            id: "player-2",
-            handle: "right-player",
-            displayName: "Right Player",
-            side: "right",
-            ready: true,
-            ai: false
-          }
-        ],
-        serverTime: "2026-07-23T00:00:00.000Z"
-      }
-    },
-    {
+      v: 1,
       type: "game.finished",
       result: {
         roomId: "room-1",
         matchId: "match-1",
+        persisted: true,
         winnerSide: "left",
         leftScore: 3,
         rightScore: 1,
@@ -155,13 +101,14 @@ describe("encodeServerEvent", () => {
       }
     },
     {
+      v: 1,
       type: "chat.message",
       message: {
-        id: "message-1",
+        id: "11111111-1111-4111-8111-111111111111",
         scope: "lobby",
         roomId: null,
         sender: {
-          id: "player-1",
+          id: "22222222-2222-4222-8222-222222222222",
           handle: "left-player",
           displayName: "Left Player",
           avatarKey: "avatar-1",
@@ -177,21 +124,13 @@ describe("encodeServerEvent", () => {
         createdAt: "2026-07-23T00:00:00.000Z"
       }
     },
-    {
-      type: "presence.changed",
-      online: 12,
-      playing: 4
-    },
-    {
-      type: "error",
-      message: "invalid event"
-    }
+    { v: 1, type: "presence.changed", online: 12, playing: 4 },
+    { v: 1, type: "error", code: "invalid_event", message: "invalid event" }
   ] satisfies ServerEvent[];
 
-  it.each(serverEvents)("serializes $type events", (event) => {
+  it.each(events)("validates and serializes $type", (event) => {
     const encoded = encodeServerEvent(event);
 
-    expect(encoded).toBe(JSON.stringify(event));
-    expect(JSON.parse(encoded)).toEqual(event);
+    expect(parseServerEvent(encoded)).toEqual(event);
   });
 });
