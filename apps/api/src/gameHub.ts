@@ -21,6 +21,7 @@ type Client = {
   socket: WebSocket;
   user: SessionUser;
   roomId: string | null;
+  lastInputSequenceByRoom: Map<string, number>;
 };
 
 type VersionlessServerEvent = ServerEvent extends infer Event
@@ -62,7 +63,13 @@ export class GameHub {
   constructor(private readonly repo: AppRepository) {}
 
   connect(socket: WebSocket, request: IncomingMessage, user: SessionUser, pendingPayloads: string[] = []): void {
-    const client: Client = { id: randomUUID(), socket, user, roomId: null };
+    const client: Client = {
+      id: randomUUID(),
+      socket,
+      user,
+      roomId: null,
+      lastInputSequenceByRoom: new Map()
+    };
     this.clients.set(client.id, client);
     socket.on("message", (payload) => this.receive(client, payload.toString()));
     socket.on("close", () => this.disconnect(client));
@@ -81,7 +88,7 @@ export class GameHub {
       if (event.type === "game.ready") this.markReady(client, event.roomId);
       if (event.type === "game.pause") this.pauseRoom(client, event.roomId);
       if (event.type === "game.resume") this.resumeRoom(client, event.roomId);
-      if (event.type === "game.input") this.applyInput(client, event.roomId, event.direction);
+      if (event.type === "game.input") this.applyInput(client, event.roomId, event.inputSeq, event.direction);
       if (event.type === "chat.send") {
         const message = await this.repo.createChatMessage({
           scope: event.scope,
@@ -338,11 +345,15 @@ export class GameHub {
     this.broadcastSnapshot(room);
   }
 
-  private applyInput(client: Client, roomId: string, direction: -1 | 0 | 1): void {
+  private applyInput(client: Client, roomId: string, inputSeq: number, direction: -1 | 0 | 1): void {
     const room = this.rooms.get(roomId);
     if (!room || room.snapshot.state.phase !== "playing") return;
     const side = sideFor(room, client);
-    if (side) room.snapshot.paddles[side].dy = direction;
+    if (!side) return;
+    const previousSequence = client.lastInputSequenceByRoom.get(roomId) ?? -1;
+    if (inputSeq <= previousSequence) return;
+    client.lastInputSequenceByRoom.set(roomId, inputSeq);
+    room.snapshot.state.paddles[side].dy = direction;
   }
 
   private pauseRoom(client: Client, roomId: string): void {
