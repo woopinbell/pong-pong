@@ -282,30 +282,33 @@ export class GameHub {
       aiController: options.ai ? new PongAi(roomId, npcUser?.rating ?? 1200) : null,
       snapshot: {
         roomId,
-        phase: "waiting",
         tick: 0,
-        leftScore: 0,
-        rightScore: 0,
-        paddles: {
-          left: { y: simulation.paddles.left.y, dy: simulation.paddles.left.direction },
-          right: { y: simulation.paddles.right.y, dy: simulation.paddles.right.direction }
-        },
-        ball: {
-          position: { ...simulation.ball.position },
-          velocity: { ...simulation.ball.velocity }
-        },
-        players: [
-          { id: left.user.id, handle: left.user.handle, displayName: left.user.displayName, side: "left", ready: false, ai: false },
-          {
-            id: rightPlayer?.id ?? "ai-opponent",
-            handle: rightPlayer?.handle ?? "ai",
-            displayName: rightPlayer?.displayName ?? "연습 AI",
-            side: "right",
-            ready: options.ai,
-            ai: options.ai
-          }
-        ],
-        serverTime: new Date().toISOString()
+        sequence: 0,
+        serverTimeMs: Date.now(),
+        state: {
+          phase: "waiting",
+          leftScore: 0,
+          rightScore: 0,
+          paddles: {
+            left: { y: simulation.paddles.left.y, dy: simulation.paddles.left.direction },
+            right: { y: simulation.paddles.right.y, dy: simulation.paddles.right.direction }
+          },
+          ball: {
+            position: { ...simulation.ball.position },
+            velocity: { ...simulation.ball.velocity }
+          },
+          players: [
+            { id: left.user.id, handle: left.user.handle, displayName: left.user.displayName, side: "left", ready: false, ai: false },
+            {
+              id: rightPlayer?.id ?? "ai-opponent",
+              handle: rightPlayer?.handle ?? "ai",
+              displayName: rightPlayer?.displayName ?? "연습 AI",
+              side: "right",
+              ready: options.ai,
+              ai: options.ai
+            }
+          ]
+        }
       }
     };
     this.rooms.set(roomId, room);
@@ -313,7 +316,7 @@ export class GameHub {
     if (right) right.roomId = roomId;
     this.send(left, { type: "queue.matched", roomId, side: "left", opponent: rightPlayer?.displayName ?? "연습 AI" });
     if (right) this.send(right, { type: "queue.matched", roomId, side: "right", opponent: left.user.displayName });
-    this.broadcastRoom(roomId, { type: "game.snapshot", snapshot: room.snapshot });
+    this.broadcastSnapshot(room);
     this.broadcastPresence();
     return roomId;
   }
