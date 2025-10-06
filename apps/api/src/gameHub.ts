@@ -23,6 +23,12 @@ type Client = {
   roomId: string | null;
 };
 
+type VersionlessServerEvent = ServerEvent extends infer Event
+  ? Event extends { v: 1 }
+    ? Omit<Event, "v">
+    : never
+  : never;
+
 type QueueEntry = {
   client: Client;
   queuedAt: number;
@@ -423,11 +429,11 @@ export class GameHub {
     });
   }
 
-  private broadcastAll(event: ServerEvent): void {
+  private broadcastAll(event: VersionlessServerEvent): void {
     for (const client of this.clients.values()) this.send(client, event);
   }
 
-  private broadcastRoom(roomId: string, event: ServerEvent): void {
+  private broadcastRoom(roomId: string, event: VersionlessServerEvent): void {
     const room = this.rooms.get(roomId);
     if (!room) return;
     for (const client of Object.values(room.clients)) {
@@ -435,9 +441,15 @@ export class GameHub {
     }
   }
 
-  private send(client: Client, event: ServerEvent): void {
+  private broadcastSnapshot(room: Room): void {
+    room.snapshot.sequence += 1;
+    room.snapshot.serverTimeMs = Date.now();
+    this.broadcastRoom(room.id, { type: "game.snapshot", snapshot: room.snapshot });
+  }
+
+  private send(client: Client, event: VersionlessServerEvent): void {
     if (client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(encodeServerEvent(event));
+      client.socket.send(encodeServerEvent({ ...event, v: 1 } as ServerEvent));
     }
   }
 }
