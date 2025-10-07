@@ -103,7 +103,11 @@ export class GameHub {
         }
       }
     } catch (error) {
-      this.send(client, { type: "error", message: error instanceof Error ? error.message : "메시지를 처리하지 못했습니다." });
+      this.send(client, {
+        type: "error",
+        code: "invalid_event",
+        message: error instanceof Error ? error.message : "메시지를 처리하지 못했습니다."
+      });
     }
   }
 
@@ -132,7 +136,11 @@ export class GameHub {
       const entry: QueueEntry = { client, queuedAt: Date.now(), npcFallbackTimer: null };
       entry.npcFallbackTimer = setTimeout(() => {
         this.matchQueuedClientWithNpc(entry).catch((error) => {
-          this.send(client, { type: "error", message: error instanceof Error ? error.message : "AI 상대를 찾지 못했습니다." });
+          this.send(client, {
+            type: "error",
+            code: "internal_error",
+            message: error instanceof Error ? error.message : "AI 상대를 찾지 못했습니다."
+          });
         });
       }, NPC_QUEUE_FALLBACK_MS);
       this.queue.push(entry);
@@ -175,15 +183,15 @@ export class GameHub {
     this.leaveTournamentWaiters(client);
     const match = await this.repo.getTournamentMatch(matchId);
     if (!match || match.status !== "ready") {
-      this.send(client, { type: "error", message: "참가할 수 없는 토너먼트 경기입니다." });
+      this.send(client, { type: "error", code: "not_found", message: "참가할 수 없는 토너먼트 경기입니다." });
       return;
     }
     if (match.leftUserId !== client.user.id && match.rightUserId !== client.user.id) {
-      this.send(client, { type: "error", message: "토너먼트 경기 참가자가 아닙니다." });
+      this.send(client, { type: "error", code: "forbidden", message: "토너먼트 경기 참가자가 아닙니다." });
       return;
     }
     if (client.roomId) {
-      this.send(client, { type: "error", message: "이미 진행 중인 경기가 있습니다." });
+      this.send(client, { type: "error", code: "forbidden", message: "이미 진행 중인 경기가 있습니다." });
       return;
     }
     const waiters = this.tournamentWaiters.get(matchId) ?? [];
