@@ -418,6 +418,7 @@ export class GameHub {
     const result: GameFinished = {
       roomId: room.id,
       matchId,
+      persisted: true,
       winnerSide,
       leftScore: room.snapshot.state.leftScore,
       rightScore: room.snapshot.state.rightScore,
