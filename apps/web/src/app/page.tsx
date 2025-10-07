@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Clock, MessageCircle, Trophy, Users, Zap } from "lucide-react";
-import type { ChatMessage, LobbyStats, PublicUser, ServerEvent, SessionUser } from "@pong-pong/shared";
+import { parseServerEvent, type ChatMessage, type LobbyStats, type PublicUser, type SessionUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
@@ -47,7 +47,7 @@ export default function HomePage() {
         socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(ticket)}&v=${protocolVersion}`);
         socketRef.current = socket;
         socket.onmessage = (event) => {
-          const message = JSON.parse(event.data) as ServerEvent;
+          const message = parseServerEvent(event.data);
           if (message.type === "chat.message" && message.message.scope === "lobby") {
             setChat((current) => [...current.filter((item) => item.id !== message.message.id).slice(-19), message.message]);
           }
@@ -82,7 +82,7 @@ export default function HomePage() {
     try {
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "chat.send", scope: "lobby", roomId: null, body }));
+        socket.send(JSON.stringify({ v: 1, type: "chat.send", scope: "lobby", roomId: null, body }));
       } else {
         const message = await sendLobbyChat(body);
         setChat((current) => [...current.slice(-19), message]);
