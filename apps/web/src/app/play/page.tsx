@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Pause, Play, Send, Signal, Users } from "lucide-react";
-import type { GameSnapshot, ServerEvent } from "@pong-pong/shared";
+import { parseServerEvent, type GameSnapshot } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { PongCanvas } from "@/components/PongCanvas";
 import { requestWsTicket } from "@/lib/api";
@@ -18,14 +18,16 @@ export default function PlayPage() {
   const socketRef = useRef<WebSocket | null>(null);
   const ticketRequestRef = useRef<AbortController | null>(null);
   const directionRef = useRef<-1 | 0 | 1>(0);
+  const inputSequenceRef = useRef(0);
+  const snapshotSequenceRef = useRef(-1);
 
-  const score = useMemo(() => (snapshot ? `${snapshot.leftScore} - ${snapshot.rightScore}` : "경기 전"), [snapshot]);
-  const phase = snapshot?.phase ?? "waiting";
+  const score = useMemo(() => (snapshot ? `${snapshot.state.leftScore} - ${snapshot.state.rightScore}` : "경기 전"), [snapshot]);
+  const phase = snapshot?.state.phase ?? "waiting";
   const canReady = Boolean(roomId && phase === "waiting");
   const canChat = Boolean(roomId && phase !== "finished" && chatInput.trim());
   const canPause = Boolean(roomId && phase === "playing");
   const canResume = Boolean(roomId && phase === "paused");
-  const opponent = snapshot?.players.find((player) => player.side === "right");
+  const opponent = snapshot?.state.players.find((player) => player.side === "right");
   const opponentName = opponent?.displayName ?? "대기 중";
   const autoStartedRef = useRef(false);
 
@@ -82,7 +84,14 @@ export default function PlayPage() {
     const timer = window.setInterval(() => {
       const socket = socketRef.current;
       if (!socket || socket.readyState !== WebSocket.OPEN) return;
-      socket.send(JSON.stringify({ type: "game.input", roomId, direction: directionRef.current }));
+      inputSequenceRef.current += 1;
+      socket.send(JSON.stringify({
+        v: 1,
+        type: "game.input",
+        roomId,
+        inputSeq: inputSequenceRef.current,
+        direction: directionRef.current
+      }));
     }, 50);
     return () => window.clearInterval(timer);
   }, [roomId, phase]);
@@ -102,6 +111,8 @@ export default function PlayPage() {
     setMessages([]);
     setChatInput("");
     directionRef.current = 0;
+    inputSequenceRef.current = 0;
+    snapshotSequenceRef.current = -1;
     setStatus("실시간 연결 준비 중");
     const controller = new AbortController();
     ticketRequestRef.current = controller;
@@ -121,24 +132,29 @@ export default function PlayPage() {
     socketRef.current = socket;
     socket.onopen = () => {
       setStatus(openStatus);
-      socket.send(JSON.stringify(payload));
+      socket.send(JSON.stringify({ v: 1, ...payload }));
     };
     socket.onmessage = (event) => {
-      const message = JSON.parse(event.data) as ServerEvent;
+      const message = parseServerEvent(event.data);
       if (message.type === "queue.matched") {
         setRoomId(message.roomId);
         setStatus(`${message.opponent} 상대와 연결됨`);
       }
       if (message.type === "game.snapshot") {
+        if (message.snapshot.sequence <= snapshotSequenceRef.current) return;
+        snapshotSequenceRef.current = message.snapshot.sequence;
         setSnapshot(message.snapshot);
-        if (message.snapshot.phase === "playing") setStatus("경기 진행 중");
-        if (message.snapshot.phase === "paused") setStatus("일시정지 중");
-        if (message.snapshot.phase === "waiting") setStatus("준비 대기 중");
+        if (message.snapshot.state.phase === "playing") setStatus("경기 진행 중");
+        if (message.snapshot.state.phase === "paused") setStatus("일시정지 중");
+        if (message.snapshot.state.phase === "waiting") setStatus("준비 대기 중");
       }
       if (message.type === "game.finished") {
         setRoomId(null);
         directionRef.current = 0;
-        setSnapshot((current) => current ? { ...current, phase: "finished" } : current);
+        setSnapshot((current) => current ? {
+          ...current,
+          state: { ...current.state, phase: "finished" }
+        } : current);
         setStatus(`경기 종료: ${message.result.leftScore} - ${message.result.rightScore}`);
       }
       if (message.type === "chat.message") setMessages((current) => [...current.slice(-5), `${message.message.sender.displayName}: ${message.message.body}`]);
@@ -155,7 +171,7 @@ export default function PlayPage() {
 
   function ready() {
     if (socketRef.current && canReady && roomId) {
-      socketRef.current.send(JSON.stringify({ type: "game.ready", roomId }));
+      socketRef.current.send(JSON.stringify({ v: 1, type: "game.ready", roomId }));
       setStatus("준비 완료");
     }
   }
@@ -164,18 +180,18 @@ export default function PlayPage() {
     event.preventDefault();
     const body = chatInput.trim();
     if (!socketRef.current || !roomId || !body) return;
-    socketRef.current.send(JSON.stringify({ type: "chat.send", scope: "match", roomId, body }));
+    socketRef.current.send(JSON.stringify({ v: 1, type: "chat.send", scope: "match", roomId, body }));
     setChatInput("");
   }
 
   function togglePause() {
     if (!socketRef.current || !roomId) return;
     if (canPause) {
-      socketRef.current.send(JSON.stringify({ type: "game.pause", roomId }));
+      socketRef.current.send(JSON.stringify({ v: 1, type: "game.pause", roomId }));
       return;
     }
     if (canResume) {
-      socketRef.current.send(JSON.stringify({ type: "game.resume", roomId }));
+      socketRef.current.send(JSON.stringify({ v: 1, type: "game.resume", roomId }));
     }
   }
 
