@@ -64,19 +64,19 @@ function drawSnapshot(ctx: CanvasRenderingContext2D, snapshot: GameSnapshot) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  drawPaddle(ctx, 32, snapshot.paddles.left.y, "#1768f2");
-  drawPaddle(ctx, GAME_WIDTH - 50, snapshot.paddles.right.y, "#12b76a");
+  drawPaddle(ctx, 32, snapshot.state.paddles.left.y, "#1768f2");
+  drawPaddle(ctx, GAME_WIDTH - 50, snapshot.state.paddles.right.y, "#12b76a");
   ctx.beginPath();
   ctx.fillStyle = "#26364f";
-  ctx.arc(snapshot.ball.position.x, snapshot.ball.position.y, BALL_RADIUS, 0, Math.PI * 2);
+  ctx.arc(snapshot.state.ball.position.x, snapshot.state.ball.position.y, BALL_RADIUS, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = "#1768f2";
   ctx.font = "bold 42px system-ui";
   ctx.textAlign = "center";
-  ctx.fillText(String(snapshot.leftScore), GAME_WIDTH / 2 - 46, 68);
+  ctx.fillText(String(snapshot.state.leftScore), GAME_WIDTH / 2 - 46, 68);
   ctx.fillStyle = "#12b76a";
-  ctx.fillText(String(snapshot.rightScore), GAME_WIDTH / 2 + 46, 68);
+  ctx.fillText(String(snapshot.state.rightScore), GAME_WIDTH / 2 + 46, 68);
 }
 
 function drawPaddle(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
@@ -88,15 +88,18 @@ function drawPaddle(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
 function toRenderSample(snapshot: GameSnapshot): RenderSample {
   return {
     ...snapshot,
-    paddles: {
-      left: { ...snapshot.paddles.left },
-      right: { ...snapshot.paddles.right }
+    state: {
+      ...snapshot.state,
+      paddles: {
+        left: { ...snapshot.state.paddles.left },
+        right: { ...snapshot.state.paddles.right }
+      },
+      ball: {
+        position: { ...snapshot.state.ball.position },
+        velocity: { ...snapshot.state.ball.velocity }
+      },
+      players: snapshot.state.players.map((player) => ({ ...player }))
     },
-    ball: {
-      position: { ...snapshot.ball.position },
-      velocity: { ...snapshot.ball.velocity }
-    },
-    players: snapshot.players.map((player) => ({ ...player })),
     receivedAt: performance.now()
   };
 }
@@ -104,20 +107,23 @@ function toRenderSample(snapshot: GameSnapshot): RenderSample {
 function emptySnapshot(): GameSnapshot {
   return {
     roomId: "",
-    phase: "waiting",
     tick: 0,
-    leftScore: 0,
-    rightScore: 0,
-    paddles: {
-      left: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 },
-      right: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 }
-    },
-    ball: {
-      position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
-      velocity: { x: 0, y: 0 }
-    },
-    players: [],
-    serverTime: new Date(0).toISOString()
+    sequence: 0,
+    serverTimeMs: 0,
+    state: {
+      phase: "waiting",
+      leftScore: 0,
+      rightScore: 0,
+      paddles: {
+        left: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 },
+        right: { y: GAME_HEIGHT / 2 - PADDLE_HEIGHT / 2, dy: 0 }
+      },
+      ball: {
+        position: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
+        velocity: { x: 0, y: 0 }
+      },
+      players: []
+    }
   };
 }
 
@@ -140,15 +146,24 @@ function interpolateSnapshot(previous: RenderSample, next: RenderSample, ratio: 
   const mix = (from: number, to: number) => from + (to - from) * ratio;
   return {
     ...next,
-    paddles: {
-      left: { ...next.paddles.left, y: mix(previous.paddles.left.y, next.paddles.left.y) },
-      right: { ...next.paddles.right, y: mix(previous.paddles.right.y, next.paddles.right.y) }
-    },
-    ball: {
-      ...next.ball,
-      position: {
-        x: mix(previous.ball.position.x, next.ball.position.x),
-        y: mix(previous.ball.position.y, next.ball.position.y)
+    state: {
+      ...next.state,
+      paddles: {
+        left: {
+          ...next.state.paddles.left,
+          y: mix(previous.state.paddles.left.y, next.state.paddles.left.y)
+        },
+        right: {
+          ...next.state.paddles.right,
+          y: mix(previous.state.paddles.right.y, next.state.paddles.right.y)
+        }
+      },
+      ball: {
+        ...next.state.ball,
+        position: {
+          x: mix(previous.state.ball.position.x, next.state.ball.position.x),
+          y: mix(previous.state.ball.position.y, next.state.ball.position.y)
+        }
       }
     }
   };
