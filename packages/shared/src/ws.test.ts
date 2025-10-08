@@ -133,4 +133,26 @@ describe("version 1 server events", () => {
 
     expect(parseServerEvent(encoded)).toEqual(event);
   });
+
+  it("rejects stale protocol shapes", () => {
+    expect(() => parseServerEvent(JSON.stringify({ type: "presence.changed", online: 1, playing: 0 }))).toThrow();
+    expect(() => parseServerEvent(JSON.stringify({
+      v: 1,
+      type: "game.snapshot",
+      snapshot: { ...snapshot, sequence: -1 }
+    }))).toThrow();
+    expect(() => parseServerEvent(JSON.stringify({
+      v: 1,
+      type: "game.finished",
+      result: {
+        roomId: "room-1",
+        matchId: null,
+        persisted: true,
+        winnerSide: "left",
+        leftScore: 3,
+        rightScore: 0,
+        ratingDelta: 16
+      }
+    }))).toThrow();
+  });
 });
