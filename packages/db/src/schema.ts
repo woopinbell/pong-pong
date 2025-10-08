@@ -33,6 +33,7 @@ export interface WsTicketTable {
 
 export interface MatchTable {
   id: Generated<string>;
+  result_key: string;
   mode: import("@pong-pong/shared").MatchMode;
   winner_id: string | null;
   loser_id: string | null;
@@ -105,6 +106,16 @@ export interface AdminActionTable {
   created_at: Generated<Date>;
 }
 
+export interface RatingHistoryTable {
+  id: Generated<string>;
+  match_id: string;
+  user_id: string;
+  rating_before: number;
+  rating_after: number;
+  delta: number;
+  created_at: Generated<Date>;
+}
+
 export type AdminActionRow = Selectable<AdminActionTable>;
 
 export interface Database {
@@ -118,6 +129,7 @@ export interface Database {
   tournament_entries: TournamentEntryTable;
   tournament_matches: TournamentMatchTable;
   admin_actions: AdminActionTable;
+  rating_history: RatingHistoryTable;
 }
 
 export type UserRow = Selectable<UserTable>;
