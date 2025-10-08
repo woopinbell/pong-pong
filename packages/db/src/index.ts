@@ -37,6 +37,20 @@ export interface CreateMatchInput {
   scoreRight: number;
 }
 
+export interface FinalizeMatchCommand extends CreateMatchInput {
+  resultKey: string;
+  tournament?: {
+    tournamentMatchId: string;
+    roomId: string;
+  };
+}
+
+export interface FinalizeMatchResult {
+  matchId: string;
+  resultKey: string;
+  created: boolean;
+}
+
 type MemoryMatchRecord = CreateMatchInput & {
   id: string;
   ended_at: string;
@@ -765,6 +779,29 @@ function assertWsTicketHash(value: string): void {
 function assertTicketTtl(value: number): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new Error("invalid websocket ticket ttl");
+  }
+}
+
+function assertFinalizeMatchCommand(command: FinalizeMatchCommand): void {
+  if (!command.resultKey.trim() || command.resultKey.length > 200) {
+    throw new Error("invalid match result key");
+  }
+  if (command.winnerId && command.winnerId === command.loserId) {
+    throw new Error("match participants must be different");
+  }
+  if (!Number.isInteger(command.scoreLeft) || command.scoreLeft < 0) {
+    throw new Error("invalid left score");
+  }
+  if (!Number.isInteger(command.scoreRight) || command.scoreRight < 0) {
+    throw new Error("invalid right score");
+  }
+  if (command.tournament) {
+    if (command.mode !== "tournament") {
+      throw new Error("tournament link requires tournament mode");
+    }
+    if (!command.tournament.tournamentMatchId || !command.tournament.roomId.trim()) {
+      throw new Error("invalid tournament match link");
+    }
   }
 }
 
