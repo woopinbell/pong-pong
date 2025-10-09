@@ -835,12 +835,25 @@ class MemoryRepository implements AppRepository {
       };
     }
 
+    const winner = command.winnerId ? this.users.get(command.winnerId) : undefined;
+    const loser = command.loserId ? this.users.get(command.loserId) : undefined;
+    if (command.winnerId && !winner) throw new Error("winner not found");
+    if (command.loserId && !loser) throw new Error("loser not found");
+
     const matchId = randomUUID();
     this.matches.push({
       ...command,
       id: matchId,
       ended_at: new Date().toISOString()
     });
+    if (winner) {
+      winner.wins += 1;
+      winner.rating += 16;
+    }
+    if (loser) {
+      loser.losses += 1;
+      loser.rating = Math.max(800, loser.rating - 12);
+    }
     return {
       matchId,
       resultKey: command.resultKey,
