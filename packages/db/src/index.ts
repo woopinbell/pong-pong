@@ -339,6 +339,41 @@ class PostgresRepository implements AppRepository {
     return firstRow(result).id;
   }
 
+  async finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult> {
+    assertFinalizeMatchCommand(command);
+
+    return this.db.transaction().execute(async (transaction) => {
+      const inserted = await sql<{ id: string }>`
+        insert into matches (
+          result_key, mode, winner_id, loser_id, score_left, score_right, rating_delta
+        )
+        values (
+          ${command.resultKey}, ${command.mode}, ${command.winnerId}, ${command.loserId},
+          ${command.scoreLeft}, ${command.scoreRight}, 16
+        )
+        on conflict (result_key) do nothing
+        returning id
+      `.execute(transaction);
+
+      if (!inserted.rows[0]) {
+        const existing = await sql<{ id: string }>`
+          select id from matches where result_key = ${command.resultKey} limit 1
+        `.execute(transaction);
+        return {
+          matchId: firstRow(existing).id,
+          resultKey: command.resultKey,
+          created: false
+        };
+      }
+
+      return {
+        matchId: inserted.rows[0].id,
+        resultKey: command.resultKey,
+        created: true
+      };
+    });
+  }
+
   async listLobbyChat(): Promise<ChatMessage[]> {
     const result = await sql<ChatMessageWithSenderRow>`
       select c.*, u.id as user_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status, u.rating, u.wins, u.losses, u.is_npc
