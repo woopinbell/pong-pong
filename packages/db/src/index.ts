@@ -366,8 +366,57 @@ class PostgresRepository implements AppRepository {
         };
       }
 
+      const matchId = inserted.rows[0].id;
+      const ratings = new Map<string, number>();
+      const participantIds = [command.winnerId, command.loserId]
+        .filter((id): id is string => id !== null)
+        .filter((id, index, values) => values.indexOf(id) === index)
+        .sort();
+
+      for (const userId of participantIds) {
+        const locked = await sql<{ id: string; rating: number }>`
+          select id, rating from users where id = ${userId} for update
+        `.execute(transaction);
+        const user = firstRow(locked);
+        ratings.set(user.id, Number(user.rating));
+      }
+
+      if (command.winnerId) {
+        const ratingBefore = requireRating(ratings, command.winnerId);
+        const ratingAfter = ratingBefore + 16;
+        await sql`
+          update users set wins = wins + 1, rating = ${ratingAfter}
+          where id = ${command.winnerId}
+        `.execute(transaction);
+        await sql`
+          insert into rating_history (
+            match_id, user_id, rating_before, rating_after, delta
+          ) values (
+            ${matchId}, ${command.winnerId}, ${ratingBefore}, ${ratingAfter},
+            ${ratingAfter - ratingBefore}
+          )
+        `.execute(transaction);
+      }
+
+      if (command.loserId) {
+        const ratingBefore = requireRating(ratings, command.loserId);
+        const ratingAfter = Math.max(800, ratingBefore - 12);
+        await sql`
+          update users set losses = losses + 1, rating = ${ratingAfter}
+          where id = ${command.loserId}
+        `.execute(transaction);
+        await sql`
+          insert into rating_history (
+            match_id, user_id, rating_before, rating_after, delta
+          ) values (
+            ${matchId}, ${command.loserId}, ${ratingBefore}, ${ratingAfter},
+            ${ratingAfter - ratingBefore}
+          )
+        `.execute(transaction);
+      }
+
       return {
-        matchId: inserted.rows[0].id,
+        matchId,
         resultKey: command.resultKey,
         created: true
       };
@@ -838,6 +887,12 @@ function assertFinalizeMatchCommand(command: FinalizeMatchCommand): void {
       throw new Error("invalid tournament match link");
     }
   }
+}
+
+function requireRating(ratings: Map<string, number>, userId: string): number {
+  const rating = ratings.get(userId);
+  if (rating === undefined) throw new Error("match participant not found");
+  return rating;
 }
 
 function avatarFor(handle: string): string {
