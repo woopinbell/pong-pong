@@ -54,6 +54,7 @@ export interface FinalizeMatchResult {
 type MemoryMatchRecord = CreateMatchInput & {
   id: string;
   ended_at: string;
+  resultKey?: string;
 };
 
 export interface TournamentMatchRecord {
@@ -820,6 +821,31 @@ class MemoryRepository implements AppRepository {
     const loser = input.loserId ? this.users.get(input.loserId) : undefined;
     if (loser) { loser.losses += 1; loser.rating -= 12; }
     return id;
+  }
+
+  async finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult> {
+    assertFinalizeMatchCommand(command);
+
+    const existing = this.matches.find((match) => match.resultKey === command.resultKey);
+    if (existing) {
+      return {
+        matchId: existing.id,
+        resultKey: command.resultKey,
+        created: false
+      };
+    }
+
+    const matchId = randomUUID();
+    this.matches.push({
+      ...command,
+      id: matchId,
+      ended_at: new Date().toISOString()
+    });
+    return {
+      matchId,
+      resultKey: command.resultKey,
+      created: true
+    };
   }
 
   async listLobbyChat(): Promise<ChatMessage[]> { return this.chats.filter((chat) => chat.scope === "lobby").slice(-20); }
