@@ -415,6 +415,80 @@ class PostgresRepository implements AppRepository {
         `.execute(transaction);
       }
 
+      if (command.tournament) {
+        const tournamentMatch = await sql<{
+          id: string;
+          tournament_id: string;
+          round: "semifinal" | "final";
+          match_id: string | null;
+          left_user_id: string | null;
+          right_user_id: string | null;
+        }>`
+          select id, tournament_id, round, match_id, left_user_id, right_user_id
+          from tournament_matches
+          where id = ${command.tournament.tournamentMatchId}
+          for update
+        `.execute(transaction);
+        const tournamentMatchRow = tournamentMatch.rows[0];
+        if (!tournamentMatchRow) {
+          throw new Error("tournament match not found");
+        }
+
+        await sql`
+          select id from tournaments
+          where id = ${tournamentMatchRow.tournament_id}
+          for update
+        `.execute(transaction);
+        if (tournamentMatchRow.match_id) {
+          throw new Error("tournament match already finalized");
+        }
+        const tournamentParticipants = [
+          tournamentMatchRow.left_user_id,
+          tournamentMatchRow.right_user_id
+        ].filter((id): id is string => id !== null);
+        if (command.winnerId && !tournamentParticipants.includes(command.winnerId)) {
+          throw new Error("winner is not in tournament match");
+        }
+        if (command.loserId && !tournamentParticipants.includes(command.loserId)) {
+          throw new Error("loser is not in tournament match");
+        }
+
+        const linked = await sql<{ id: string }>`
+          update tournament_matches
+          set status = 'finished', room_id = ${command.tournament.roomId},
+              match_id = ${matchId}, winner_id = ${command.winnerId},
+              score_left = ${command.scoreLeft}, score_right = ${command.scoreRight},
+              updated_at = now()
+          where id = ${command.tournament.tournamentMatchId} and match_id is null
+          returning id
+        `.execute(transaction);
+        firstRow(linked);
+
+        if (tournamentMatchRow.round === "semifinal") {
+          const semifinals = await sql<{ winner_id: string; slot: number }>`
+            select winner_id, slot from tournament_matches
+            where tournament_id = ${tournamentMatchRow.tournament_id}
+              and round = 'semifinal' and status = 'finished' and winner_id is not null
+            order by slot asc
+          `.execute(transaction);
+          if (semifinals.rows.length === 2) {
+            await sql`
+              insert into tournament_matches (
+                tournament_id, round, slot, left_user_id, right_user_id, status
+              ) values (
+                ${tournamentMatchRow.tournament_id}, 'final', 1,
+                ${semifinals.rows[0].winner_id}, ${semifinals.rows[1].winner_id}, 'ready'
+              ) on conflict (tournament_id, round, slot) do nothing
+            `.execute(transaction);
+          }
+        } else {
+          await sql`
+            update tournaments set status = 'finished', winner_id = ${command.winnerId}
+            where id = ${tournamentMatchRow.tournament_id}
+          `.execute(transaction);
+        }
+      }
+
       return {
         matchId,
         resultKey: command.resultKey,
