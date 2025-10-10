@@ -33,6 +33,80 @@ describe("memory repository", () => {
     expect(dashboard.me.rating).toBe(left.rating + 32);
   });
 
+  it("finalizes the same match result once when commands are repeated", async () => {
+    const repo = createMemoryRepository();
+    const winner = await repo.upsertDevUser({ handle: "winner", displayName: "승자" });
+    const loser = await repo.upsertDevUser({ handle: "loser", displayName: "패자" });
+    const command = {
+      resultKey: "room:memory-finalize:finished",
+      mode: "queue" as const,
+      winnerId: winner.id,
+      loserId: loser.id,
+      scoreLeft: 3,
+      scoreRight: 1
+    };
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, () => repo.finalizeMatch(command))
+    );
+    const dashboard = await repo.getDashboard(winner.id);
+    const updatedLoser = await repo.getUserById(loser.id);
+
+    expect(new Set(results.map((result) => result.matchId)).size).toBe(1);
+    expect(results.filter((result) => result.created)).toHaveLength(1);
+    expect(dashboard.recentMatches).toHaveLength(1);
+    expect(dashboard.me.wins).toBe(1);
+    expect(dashboard.me.rating).toBe(winner.rating + 16);
+    expect(updatedLoser?.losses).toBe(1);
+    expect(updatedLoser?.rating).toBe(loser.rating - 12);
+  });
+
+  it("links concurrent semifinal results and creates one final", async () => {
+    const repo = createMemoryRepository();
+    const players = await Promise.all(
+      ["semi-one", "semi-two", "semi-three", "semi-four"].map((handle, index) =>
+        repo.upsertDevUser({ handle, displayName: `선수 ${index + 1}` })
+      )
+    );
+    const tournament = await repo.createTournament({
+      name: "동시 종료 컵",
+      createdBy: players[0].id
+    });
+    await repo.joinTournament(tournament.id, players[1].id);
+    await repo.joinTournament(tournament.id, players[2].id);
+    const ready = await repo.joinTournament(tournament.id, players[3].id);
+    const [semiA, semiB] = ready.matches.filter((match) => match.round === "semifinal");
+
+    await Promise.all([
+      repo.finalizeMatch({
+        resultKey: "room:memory-semi-a:finished",
+        mode: "tournament",
+        winnerId: semiA.left?.id ?? null,
+        loserId: semiA.right?.id ?? null,
+        scoreLeft: 3,
+        scoreRight: 1,
+        tournament: { tournamentMatchId: semiA.id, roomId: "memory-semi-a" }
+      }),
+      repo.finalizeMatch({
+        resultKey: "room:memory-semi-b:finished",
+        mode: "tournament",
+        winnerId: semiB.left?.id ?? null,
+        loserId: semiB.right?.id ?? null,
+        scoreLeft: 3,
+        scoreRight: 2,
+        tournament: { tournamentMatchId: semiB.id, roomId: "memory-semi-b" }
+      })
+    ]);
+
+    const completed = (await repo.listTournaments()).find((item) => item.id === tournament.id);
+    const finalMatches = completed?.matches.filter((match) => match.round === "final") ?? [];
+
+    expect(finalMatches).toHaveLength(1);
+    expect(finalMatches[0].left?.id).toBe(semiA.left?.id);
+    expect(finalMatches[0].right?.id).toBe(semiB.left?.id);
+    expect(completed?.matches.filter((match) => match.round === "semifinal" && match.matchId)).toHaveLength(2);
+  });
+
   it("derives the best streak from recent match results", async () => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData();

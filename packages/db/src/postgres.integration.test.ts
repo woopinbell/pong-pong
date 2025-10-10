@@ -57,6 +57,7 @@ describe("PostgreSQL integration", () => {
         "chat_messages",
         "friendships",
         "matches",
+        "rating_history",
         "sessions",
         "tournament_entries",
         "tournament_matches",
@@ -65,7 +66,7 @@ describe("PostgreSQL integration", () => {
         "ws_tickets"
       ]));
       const firstMigrations = await appliedMigrations(pool);
-      expect(firstMigrations).toEqual(["001_initial", "002_ws_tickets"]);
+      expect(firstMigrations).toEqual(["001_initial", "002_ws_tickets", "003_match_finalization"]);
 
       await migrateDatabase(databaseUrl);
 
@@ -178,6 +179,220 @@ describe("PostgreSQL integration", () => {
         "select count(*)::integer as count from ws_tickets"
       );
       expect(remaining.rows[0]?.count).toBe(0);
+    });
+  });
+
+  it("applies a match result and rating changes once across 20 concurrent calls", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const winner = await repository.upsertDevUser({
+        handle: "finalize-winner",
+        displayName: "Finalize Winner"
+      });
+      const loser = await repository.upsertDevUser({
+        handle: "finalize-loser",
+        displayName: "Finalize Loser"
+      });
+      const command = {
+        resultKey: "room:postgres-finalize:finished",
+        mode: "queue" as const,
+        winnerId: winner.id,
+        loserId: loser.id,
+        scoreLeft: 3,
+        scoreRight: 1
+      };
+
+      const results = await Promise.all(
+        Array.from({ length: 20 }, () => repository.finalizeMatch(command))
+      );
+
+      expect(new Set(results.map((result) => result.matchId)).size).toBe(1);
+      expect(results.filter((result) => result.created)).toHaveLength(1);
+
+      const matches = await pool.query<{
+        id: string;
+        result_key: string;
+      }>("select id, result_key from matches");
+      expect(matches.rows).toEqual([{
+        id: results[0].matchId,
+        result_key: command.resultKey
+      }]);
+
+      const users = await pool.query<{
+        handle: string;
+        rating: number;
+        wins: number;
+        losses: number;
+      }>(
+        "select handle, rating, wins, losses from users where id = any($1::uuid[]) order by handle",
+        [[winner.id, loser.id]]
+      );
+      expect(users.rows).toEqual([
+        { handle: "finalize-loser", rating: loser.rating - 12, wins: 0, losses: 1 },
+        { handle: "finalize-winner", rating: winner.rating + 16, wins: 1, losses: 0 }
+      ]);
+
+      const history = await pool.query<{
+        handle: string;
+        rating_before: number;
+        rating_after: number;
+        delta: number;
+      }>(`
+        select u.handle, h.rating_before, h.rating_after, h.delta
+        from rating_history h
+        join users u on u.id = h.user_id
+        order by u.handle
+      `);
+      expect(history.rows).toEqual([
+        {
+          handle: "finalize-loser",
+          rating_before: loser.rating,
+          rating_after: loser.rating - 12,
+          delta: -12
+        },
+        {
+          handle: "finalize-winner",
+          rating_before: winner.rating,
+          rating_after: winner.rating + 16,
+          delta: 16
+        }
+      ]);
+    });
+  });
+
+  it("rolls back the result and ratings when tournament linking fails", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const winner = await repository.upsertDevUser({
+        handle: "rollback-winner",
+        displayName: "Rollback Winner"
+      });
+      const loser = await repository.upsertDevUser({
+        handle: "rollback-loser",
+        displayName: "Rollback Loser"
+      });
+      const resultKey = "room:rollback-finalize:finished";
+
+      await expect(repository.finalizeMatch({
+        resultKey,
+        mode: "tournament",
+        winnerId: winner.id,
+        loserId: loser.id,
+        scoreLeft: 3,
+        scoreRight: 0,
+        tournament: {
+          tournamentMatchId: randomUUID(),
+          roomId: "rollback-finalize"
+        }
+      })).rejects.toThrow("tournament match not found");
+
+      const counts = await pool.query<{
+        matches: number;
+        history: number;
+      }>(`
+        select
+          (select count(*)::integer from matches where result_key = $1) as matches,
+          (select count(*)::integer from rating_history) as history
+      `, [resultKey]);
+      expect(counts.rows[0]).toEqual({ matches: 0, history: 0 });
+
+      const users = await pool.query<{
+        handle: string;
+        rating: number;
+        wins: number;
+        losses: number;
+      }>(
+        "select handle, rating, wins, losses from users where id = any($1::uuid[]) order by handle",
+        [[winner.id, loser.id]]
+      );
+      expect(users.rows).toEqual([
+        { handle: "rollback-loser", rating: loser.rating, wins: 0, losses: 0 },
+        { handle: "rollback-winner", rating: winner.rating, wins: 0, losses: 0 }
+      ]);
+    });
+  });
+
+  it("links concurrent semifinals and creates exactly one final", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const players = await Promise.all(
+        ["pg-semi-one", "pg-semi-two", "pg-semi-three", "pg-semi-four"].map((handle, index) =>
+          repository.upsertDevUser({ handle, displayName: `Postgres Player ${index + 1}` })
+        )
+      );
+      const tournament = await repository.createTournament({
+        name: "Postgres Concurrent Cup",
+        createdBy: players[0].id
+      });
+      await repository.joinTournament(tournament.id, players[1].id);
+      await repository.joinTournament(tournament.id, players[2].id);
+      const ready = await repository.joinTournament(tournament.id, players[3].id);
+      const [semiA, semiB] = ready.matches.filter((match) => match.round === "semifinal");
+
+      const [resultA, resultB] = await Promise.all([
+        repository.finalizeMatch({
+          resultKey: "room:postgres-semi-a:finished",
+          mode: "tournament",
+          winnerId: semiA.left?.id ?? null,
+          loserId: semiA.right?.id ?? null,
+          scoreLeft: 3,
+          scoreRight: 1,
+          tournament: { tournamentMatchId: semiA.id, roomId: "postgres-semi-a" }
+        }),
+        repository.finalizeMatch({
+          resultKey: "room:postgres-semi-b:finished",
+          mode: "tournament",
+          winnerId: semiB.left?.id ?? null,
+          loserId: semiB.right?.id ?? null,
+          scoreLeft: 3,
+          scoreRight: 2,
+          tournament: { tournamentMatchId: semiB.id, roomId: "postgres-semi-b" }
+        })
+      ]);
+
+      const tournamentMatches = await pool.query<{
+        round: string;
+        slot: number;
+        status: string;
+        left_user_id: string | null;
+        right_user_id: string | null;
+        match_id: string | null;
+      }>(`
+        select round, slot, status, left_user_id, right_user_id, match_id
+        from tournament_matches
+        where tournament_id = $1
+        order by case when round = 'semifinal' then 1 else 2 end, slot
+      `, [tournament.id]);
+      const semifinals = tournamentMatches.rows.filter((match) => match.round === "semifinal");
+      const finals = tournamentMatches.rows.filter((match) => match.round === "final");
+
+      expect(semifinals.map((match) => match.match_id).sort()).toEqual(
+        [resultA.matchId, resultB.matchId].sort()
+      );
+      expect(semifinals.every((match) => match.status === "finished")).toBe(true);
+      expect(finals).toEqual([expect.objectContaining({
+        round: "final",
+        slot: 1,
+        status: "ready",
+        left_user_id: semiA.left?.id,
+        right_user_id: semiB.left?.id,
+        match_id: null
+      })]);
+
+      const counts = await pool.query<{
+        matches: number;
+        history: number;
+        finals: number;
+      }>(`
+        select
+          (select count(*)::integer from matches) as matches,
+          (select count(*)::integer from rating_history) as history,
+          (select count(*)::integer from tournament_matches where tournament_id = $1 and round = 'final') as finals
+      `, [tournament.id]);
+      expect(counts.rows[0]).toEqual({ matches: 2, history: 4, finals: 1 });
     });
   });
 
