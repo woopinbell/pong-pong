@@ -840,6 +840,33 @@ class MemoryRepository implements AppRepository {
     if (command.winnerId && !winner) throw new Error("winner not found");
     if (command.loserId && !loser) throw new Error("loser not found");
 
+    const tournamentLink = command.tournament
+      ? this.tournaments
+          .map((tournament) => ({
+            tournament,
+            match: tournament.matches.find((item) => item.id === command.tournament?.tournamentMatchId)
+          }))
+          .find((link) => link.match)
+      : null;
+    if (command.tournament && (!tournamentLink || !tournamentLink.match)) {
+      throw new Error("tournament match not found");
+    }
+    if (tournamentLink?.match?.matchId) {
+      throw new Error("tournament match already finalized");
+    }
+    if (tournamentLink?.match) {
+      const participantIds = [
+        tournamentLink.match.left?.id,
+        tournamentLink.match.right?.id
+      ].filter((id): id is string => id !== undefined);
+      if (command.winnerId && !participantIds.includes(command.winnerId)) {
+        throw new Error("winner is not in tournament match");
+      }
+      if (command.loserId && !participantIds.includes(command.loserId)) {
+        throw new Error("loser is not in tournament match");
+      }
+    }
+
     const matchId = randomUUID();
     this.matches.push({
       ...command,
@@ -853,6 +880,21 @@ class MemoryRepository implements AppRepository {
     if (loser) {
       loser.losses += 1;
       loser.rating = Math.max(800, loser.rating - 12);
+    }
+    if (command.tournament && tournamentLink?.match) {
+      const { tournament, match } = tournamentLink;
+      match.status = "finished";
+      match.roomId = command.tournament.roomId;
+      match.matchId = matchId;
+      match.winner = winner ? toPublicUser(winner, true) : null;
+      match.scoreLeft = command.scoreLeft;
+      match.scoreRight = command.scoreRight;
+      if (match.round === "semifinal") {
+        this.ensureMemoryFinal(tournament);
+      } else {
+        tournament.status = "finished";
+        tournament.winner = winner ? toPublicUser(winner, true) : null;
+      }
     }
     return {
       matchId,
