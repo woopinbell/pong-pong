@@ -54,7 +54,7 @@ export interface FinalizeMatchResult {
 type MemoryMatchRecord = CreateMatchInput & {
   id: string;
   ended_at: string;
-  resultKey?: string;
+  resultKey: string;
 };
 
 export interface TournamentMatchRecord {
@@ -90,6 +90,7 @@ export interface AppRepository {
   requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary>;
   acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary>;
   createMatch(input: CreateMatchInput): Promise<string>;
+  finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult>;
   listLobbyChat(): Promise<ChatMessage[]>;
   createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage>;
   listTournaments(): Promise<TournamentSummary[]>;
@@ -331,13 +332,11 @@ class PostgresRepository implements AppRepository {
   }
 
   async createMatch(input: CreateMatchInput): Promise<string> {
-    const result = await sql<{ id: string }>`
-      insert into matches (mode, winner_id, loser_id, score_left, score_right, rating_delta)
-      values (${input.mode}, ${input.winnerId}, ${input.loserId}, ${input.scoreLeft}, ${input.scoreRight}, 16) returning id
-    `.execute(this.db);
-    if (input.winnerId) await sql`update users set wins = wins + 1, rating = rating + 16 where id = ${input.winnerId}`.execute(this.db);
-    if (input.loserId) await sql`update users set losses = losses + 1, rating = greatest(800, rating - 12) where id = ${input.loserId}`.execute(this.db);
-    return firstRow(result).id;
+    const result = await this.finalizeMatch({
+      ...input,
+      resultKey: `legacy:${randomUUID()}`
+    });
+    return result.matchId;
   }
 
   async finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult> {
@@ -814,13 +813,11 @@ class MemoryRepository implements AppRepository {
   }
 
   async createMatch(input: CreateMatchInput): Promise<string> {
-    const id = randomUUID();
-    this.matches.push({ ...input, id, ended_at: new Date().toISOString() });
-    const winner = input.winnerId ? this.users.get(input.winnerId) : undefined;
-    if (winner) { winner.wins += 1; winner.rating += 16; }
-    const loser = input.loserId ? this.users.get(input.loserId) : undefined;
-    if (loser) { loser.losses += 1; loser.rating -= 12; }
-    return id;
+    const result = await this.finalizeMatch({
+      ...input,
+      resultKey: `legacy:${randomUUID()}`
+    });
+    return result.matchId;
   }
 
   async finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult> {
