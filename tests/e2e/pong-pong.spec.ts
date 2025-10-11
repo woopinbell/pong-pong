@@ -91,27 +91,29 @@ test("프로필 친구 요청과 공유 복사를 확인한다", async ({ page }
   await expect(page.getByText(/공유 링크를/)).toBeVisible();
 });
 
-test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ page, request }, testInfo) => {
+test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ page, playwright }, testInfo) => {
   const suffix = `${testInfo.project.name}-${Date.now()}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
   await login(page, `cup-player-${suffix}`, "컵선수");
-  const token = await page.evaluate(() => window.localStorage.getItem("pong-pong-token"));
   const name = `E2E 퐁퐁 컵 ${suffix}`;
-  const created = await request.post(`${apiBase}/tournaments`, {
-    headers: { authorization: `Bearer ${token}` },
+  const created = await page.request.post(`${apiBase}/tournaments`, {
     data: { name }
   });
+  expect(created.ok()).toBe(true);
   const tournament = (await created.json()).tournament as { id: string };
-  await request.post(`${apiBase}/tournaments/${tournament.id}/join`, {
-    headers: { authorization: `Bearer ${token}` }
-  });
+  const duplicateJoin = await page.request.post(`${apiBase}/tournaments/${tournament.id}/join`);
+  expect(duplicateJoin.ok()).toBe(true);
   for (const handle of ["cup-two", "cup-three", "cup-four"]) {
-    const loginResponse = await request.post(`${apiBase}/auth/dev-login`, {
-      data: { handle: `${handle}-${suffix}`, displayName: handle }
-    });
-    const playerToken = (await loginResponse.json()).token as string;
-    await request.post(`${apiBase}/tournaments/${tournament.id}/join`, {
-      headers: { authorization: `Bearer ${playerToken}` }
-    });
+    const playerRequest = await playwright.request.newContext({ baseURL: apiBase });
+    try {
+      const loginResponse = await playerRequest.post("/auth/dev-login", {
+        data: { handle: `${handle}-${suffix}`, displayName: handle }
+      });
+      expect(loginResponse.ok()).toBe(true);
+      const joinResponse = await playerRequest.post(`/tournaments/${tournament.id}/join`);
+      expect(joinResponse.ok()).toBe(true);
+    } finally {
+      await playerRequest.dispose();
+    }
   }
   await page.getByRole("link", { name: "토너먼트" }).click();
   await page.getByRole("button", { name }).click();
@@ -119,13 +121,9 @@ test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ 
   await expect(page.getByRole("link", { name: "경기 입장" })).toBeVisible();
 });
 
-test("관리 화면에서 사용자 상태를 변경한다", async ({ page }) => {
-  const reason = `E2E 운영 확인 ${Date.now()} ${Math.random()}`;
+test("admin 핸들만으로 운영자 권한을 얻지 못한다", async ({ page }) => {
   await login(page, "admin", "운영자");
   await page.getByRole("link", { name: "관리" }).click();
-  await expect(page.getByText("사용자 목록과 감사 로그를 불러왔습니다.")).toBeVisible();
-  await page.getByLabel("조치 사유").fill(reason);
-  await page.getByRole("button", { name: /정지|해제/ }).first().click();
-  await expect(page.getByText(/상태를|운영자 권한/)).toBeVisible();
-  await expect(page.getByText(reason)).toBeVisible();
+  await expect(page.getByText("운영자 권한이 필요합니다.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /정지|해제/ })).toHaveCount(0);
 });
