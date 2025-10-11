@@ -48,6 +48,7 @@ type Room = {
   npcUser: PublicUser | null;
   simulation: PongSimulationState;
   aiController: PongAi | null;
+  finishing: Promise<void> | null;
 };
 
 const NPC_QUEUE_FALLBACK_MS = 6000;
@@ -295,6 +296,7 @@ export class GameHub {
       npcUser,
       simulation,
       aiController: options.ai ? new PongAi(roomId, npcUser?.rating ?? 1200) : null,
+      finishing: null,
       snapshot: {
         roomId,
         tick: 0,
@@ -400,7 +402,17 @@ export class GameHub {
     }
   }
 
-  private async finishRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
+  private finishRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
+    if (room.finishing) return room.finishing;
+    const finalization = this.finalizeRoom(room, winnerSide);
+    room.finishing = finalization;
+    void finalization.catch(() => {
+      if (room.finishing === finalization) room.finishing = null;
+    });
+    return finalization;
+  }
+
+  private async finalizeRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
     if (room.timer) clearInterval(room.timer);
     room.timer = null;
     room.snapshot.state.phase = "finished";
@@ -408,16 +420,23 @@ export class GameHub {
     const rightUser = room.clients.right?.user ?? room.npcUser ?? null;
     const winner = winnerSide === "left" ? leftUser : rightUser;
     const loser = winnerSide === "left" ? rightUser : leftUser;
-    const matchId = await this.repo.createMatch({
+    const finalized = await this.repo.finalizeMatch({
+      resultKey: `room:${room.id}:finished`,
       mode: room.mode,
       winnerId: winner?.id ?? null,
       loserId: loser?.id ?? null,
       scoreLeft: room.snapshot.state.leftScore,
-      scoreRight: room.snapshot.state.rightScore
+      scoreRight: room.snapshot.state.rightScore,
+      ...(room.tournamentMatchId ? {
+        tournament: {
+          tournamentMatchId: room.tournamentMatchId,
+          roomId: room.id
+        }
+      } : {})
     });
     const result: GameFinished = {
       roomId: room.id,
-      matchId,
+      matchId: finalized.matchId,
       persisted: true,
       winnerSide,
       leftScore: room.snapshot.state.leftScore,
@@ -425,16 +444,6 @@ export class GameHub {
       ratingDelta: 16
     };
     this.broadcastRoom(room.id, { type: "game.finished", result });
-    if (room.tournamentMatchId) {
-      await this.repo.completeTournamentMatch({
-        tournamentMatchId: room.tournamentMatchId,
-        roomId: room.id,
-        matchId,
-        winnerId: winner?.id ?? null,
-        scoreLeft: room.snapshot.state.leftScore,
-        scoreRight: room.snapshot.state.rightScore
-      });
-    }
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
     }
