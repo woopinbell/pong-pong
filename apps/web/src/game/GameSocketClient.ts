@@ -40,6 +40,75 @@ export class GameSocketClient {
 
   constructor(private readonly options: GameSocketClientOptions) {}
 
+  async connect(initialEvent: ClientEvent, handlers: GameSocketHandlers): Promise<void> {
+    const generation = this.replaceConnection();
+    const controller = new AbortController();
+    this.ticketRequest = controller;
+    handlers.onConnecting();
+
+    let ticket: WsTicketResponse;
+    try {
+      ticket = await this.options.ticketProvider(controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted || generation !== this.generation || isAbortError(error)) return;
+      handlers.onFailure(error);
+      return;
+    } finally {
+      if (this.ticketRequest === controller) this.ticketRequest = null;
+    }
+
+    if (controller.signal.aborted || generation !== this.generation) return;
+
+    const separator = this.options.url.includes("?") ? "&" : "?";
+    const socket = this.options.socketFactory(
+      `${this.options.url}${separator}ticket=${encodeURIComponent(ticket.ticket)}&v=${ticket.protocolVersion}`
+    );
+    this.socket = socket;
+    this.inputSequence = 0;
+
+    socket.onopen = () => {
+      if (!this.isCurrent(socket, generation)) return;
+      handlers.onOpen();
+      socket.send(JSON.stringify(initialEvent));
+    };
+    socket.onmessage = (event) => {
+      if (!this.isCurrent(socket, generation)) return;
+      try {
+        if (typeof event.data !== "string") throw new Error("문자열 형식의 실시간 메시지가 아닙니다.");
+        handlers.onEvent(parseServerEvent(event.data));
+      } catch (error) {
+        handlers.onFailure(error);
+      }
+    };
+    socket.onerror = () => {
+      if (this.isCurrent(socket, generation)) handlers.onFailure(new Error("실시간 연결에서 오류가 발생했습니다."));
+    };
+    socket.onclose = () => {
+      if (!this.isCurrent(socket, generation)) return;
+      this.socket = null;
+      handlers.onClosed();
+    };
+  }
+
+  send(event: ClientEvent): boolean {
+    if (!this.socket || this.socket.readyState !== OPEN) return false;
+    this.socket.send(JSON.stringify(event));
+    return true;
+  }
+
+  sendDirection(roomId: string, direction: -1 | 0 | 1): number | null {
+    if (!this.socket || this.socket.readyState !== OPEN) return null;
+    this.inputSequence += 1;
+    this.socket.send(JSON.stringify({
+      v: 1,
+      type: "game.input",
+      roomId,
+      inputSeq: this.inputSequence,
+      direction
+    } satisfies ClientEvent));
+    return this.inputSequence;
+  }
+
   close(): void {
     this.replaceConnection();
   }
