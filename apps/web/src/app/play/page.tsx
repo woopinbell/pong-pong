@@ -44,19 +44,14 @@ export default function PlayPage() {
     const mode = params.get("mode");
     if (tournamentMatchId) {
       autoStartedRef.current = true;
-      connectTournament(tournamentMatchId);
+      void connection.connectTournament(tournamentMatchId);
       return;
     }
-    if (mode === "ai") {
+    if (mode === "ai" || mode === "queue") {
       autoStartedRef.current = true;
-      connect("ai");
-      return;
+      void connection.connectQueue(mode);
     }
-    if (mode === "queue") {
-      autoStartedRef.current = true;
-      connect("queue");
-    }
-  }, []);
+  }, [connection.connectQueue, connection.connectTournament]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
