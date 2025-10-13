@@ -13,6 +13,13 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export default function PlayPage() {
   const connection = useGameConnection();
+  const {
+    state: connectionState,
+    connectQueue,
+    ready: readyWithHook,
+    sendChat: sendChatWithHook,
+    togglePause: togglePauseWithHook
+  } = connection;
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [status, setStatus] = useState("대기 중");
@@ -24,15 +31,24 @@ export default function PlayPage() {
   const inputSequenceRef = useRef(0);
   const snapshotSequenceRef = useRef(-1);
   const inputDirectionRef = useRef<-1 | 0 | 1>(0);
-
-  const score = useMemo(() => (snapshot ? `${snapshot.state.leftScore} - ${snapshot.state.rightScore}` : "경기 전"), [snapshot]);
   const phase = snapshot?.state.phase ?? "waiting";
-  const canReady = Boolean(roomId && phase === "waiting");
-  const canChat = Boolean(roomId && phase !== "finished" && chatInput.trim());
-  const canPause = Boolean(roomId && phase === "playing");
-  const canResume = Boolean(roomId && phase === "paused");
-  const opponent = snapshot?.state.players.find((player) => player.side === "right");
-  const opponentName = opponent?.displayName ?? "대기 중";
+
+  const activeSnapshot = connectionState.snapshot;
+  const activeRoomId = connectionState.roomId;
+  const score = useMemo(
+    () => activeSnapshot ? `${activeSnapshot.state.leftScore} - ${activeSnapshot.state.rightScore}` : "경기 전",
+    [activeSnapshot]
+  );
+  const canReady = Boolean(activeRoomId && connectionState.status === "waitingReady");
+  const canChat = Boolean(
+    activeRoomId
+    && chatInput.trim()
+    && ["waitingReady", "playing", "paused"].includes(connectionState.status)
+  );
+  const canPause = Boolean(activeRoomId && connectionState.status === "playing");
+  const canResume = Boolean(activeRoomId && connectionState.status === "paused");
+  const opponent = activeSnapshot?.state.players.find((player) => player.side === "right");
+  const opponentName = connectionState.opponent ?? opponent?.displayName ?? "대기 중";
   const autoStartedRef = useRef(false);
 
   useEffect(() => () => closeCurrentSocket(), []);
@@ -207,6 +223,17 @@ export default function PlayPage() {
     socketRef.current = null;
   }
 
+  function startQueue(mode: "queue" | "ai") {
+    inputDirectionRef.current = 0;
+    setChatInput("");
+    void connectQueue(mode);
+  }
+
+  function submitChat(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (sendChatWithHook(chatInput)) setChatInput("");
+  }
+
   return (
     <AppShell>
       <div className="grid gap-5 xl:grid-cols-[1fr_340px]">
@@ -217,10 +244,10 @@ export default function PlayPage() {
               <p className="mt-2 text-sm font-semibold text-muted">키보드 위쪽과 아래쪽 방향키로 패들을 움직입니다.</p>
             </div>
             <div className="flex gap-3">
-              <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => connect("queue")}>
+              <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => startQueue("queue")}>
                 매칭 큐 참가
               </button>
-              <button className="focus-ring rounded-lg bg-green-600 px-4 py-3 text-sm font-black text-white" onClick={() => connect("ai")}>
+              <button className="focus-ring rounded-lg bg-green-600 px-4 py-3 text-sm font-black text-white" onClick={() => startQueue("ai")}>
                 인공지능 연습 시작
               </button>
             </div>
@@ -228,11 +255,11 @@ export default function PlayPage() {
           <section className="card p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-black text-green-600">
-                <Signal size={18} /> {status}
+                <Signal size={18} /> {connectionState.notice}
               </div>
               <div className="text-2xl font-black text-ink">{score}</div>
             </div>
-            <PongCanvas snapshot={snapshot} />
+            <PongCanvas snapshot={activeSnapshot} />
           </section>
           <section className="grid gap-4 md:grid-cols-2">
             <div className="card p-5">
@@ -240,7 +267,7 @@ export default function PlayPage() {
               <p className="mt-2 text-sm font-semibold text-muted">방이 잡히면 준비 버튼으로 경기를 시작합니다.</p>
               <button
                 className="focus-ring mt-4 rounded-lg border border-blue-200 px-4 py-2 text-sm font-black text-blue-700 disabled:cursor-not-allowed disabled:border-line disabled:text-muted"
-                onClick={ready}
+                onClick={readyWithHook}
                 disabled={!canReady}
               >
                 <Play size={16} className="mr-2 inline" />
@@ -252,7 +279,7 @@ export default function PlayPage() {
               <p className="mt-2 text-sm font-semibold text-muted">서버 경기 상태를 멈추거나 다시 시작합니다.</p>
               <button
                 className="focus-ring mt-4 rounded-lg border border-line bg-white px-4 py-2 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
-                onClick={togglePause}
+                onClick={togglePauseWithHook}
                 disabled={!canPause && !canResume}
               >
                 <Pause size={16} className="mr-2 inline" />
@@ -274,17 +301,17 @@ export default function PlayPage() {
               <MessageCircle size={20} /> 매치 채팅
             </h2>
             <div className="mt-4 grid gap-3">
-              {messages.length === 0 ? (
+              {connectionState.messages.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-line p-3 text-sm font-semibold text-muted">아직 매치 채팅이 없습니다.</div>
               ) : (
-                messages.map((message, index) => (
+                connectionState.messages.map((message, index) => (
                   <div key={`${message}-${index}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-muted">
                     {message}
                   </div>
                 ))
               )}
             </div>
-            <form className="mt-4 flex gap-2" onSubmit={sendChat}>
+            <form className="mt-4 flex gap-2" onSubmit={submitChat}>
               <input
                 className="focus-ring min-w-0 flex-1 rounded-lg border border-line px-3 py-2 text-sm"
                 placeholder="메시지 입력"
