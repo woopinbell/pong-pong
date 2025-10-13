@@ -62,9 +62,46 @@ export function useGameConnection() {
     "토너먼트 경기 상대 입장 대기 중"
   ), [connect]);
 
+  const ready = useCallback(() => {
+    if (!state.roomId) return false;
+    const sent = client.send({ v: 1, type: "game.ready", roomId: state.roomId });
+    if (sent) dispatch({ type: "readySent" });
+    return sent;
+  }, [client, state.roomId]);
+
+  const sendChat = useCallback((body: string) => {
+    const trimmed = body.trim();
+    if (!state.roomId || !trimmed) return false;
+    return client.send({ v: 1, type: "chat.send", scope: "match", roomId: state.roomId, body: trimmed });
+  }, [client, state.roomId]);
+
+  const togglePause = useCallback(() => {
+    if (!state.roomId) return false;
+    if (state.status === "playing") {
+      return client.send({ v: 1, type: "game.pause", roomId: state.roomId });
+    }
+    if (state.status === "paused") {
+      return client.send({ v: 1, type: "game.resume", roomId: state.roomId });
+    }
+    return false;
+  }, [client, state.roomId, state.status]);
+
+  const sendDirection = useCallback((direction: -1 | 0 | 1) => {
+    if (!state.roomId) return null;
+    return client.sendDirection(state.roomId, direction);
+  }, [client, state.roomId]);
+
   useEffect(() => () => client.close(), [client]);
 
-  return { state, connectQueue, connectTournament };
+  return {
+    state,
+    connectQueue,
+    connectTournament,
+    ready,
+    sendChat,
+    togglePause,
+    sendDirection
+  };
 }
 
 function failureMessage(error: unknown): string {
