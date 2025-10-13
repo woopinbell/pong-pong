@@ -1,15 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageCircle, Pause, Play, Send, Signal, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, MessageCircle, Pause, Play, Send, Signal, Users } from "lucide-react";
 import { parseServerEvent, type GameSnapshot } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { PongCanvas } from "@/components/PongCanvas";
+import { directionForKey, isEditableTarget } from "@/game/gameInput";
+import { useGameConnection } from "@/game/useGameConnection";
 import { requestWsTicket } from "@/lib/api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export default function PlayPage() {
+  const connection = useGameConnection();
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [status, setStatus] = useState("대기 중");
@@ -20,6 +23,7 @@ export default function PlayPage() {
   const directionRef = useRef<-1 | 0 | 1>(0);
   const inputSequenceRef = useRef(0);
   const snapshotSequenceRef = useRef(-1);
+  const inputDirectionRef = useRef<-1 | 0 | 1>(0);
 
   const score = useMemo(() => (snapshot ? `${snapshot.state.leftScore} - ${snapshot.state.rightScore}` : "경기 전"), [snapshot]);
   const phase = snapshot?.state.phase ?? "waiting";
