@@ -47,9 +47,58 @@ export default function PlayPage() {
   );
   const canPause = Boolean(activeRoomId && connectionState.status === "playing");
   const canResume = Boolean(activeRoomId && connectionState.status === "paused");
+  const canMove = Boolean(activeRoomId && connectionState.status === "playing");
   const opponent = activeSnapshot?.state.players.find((player) => player.side === "right");
   const opponentName = connectionState.opponent ?? opponent?.displayName ?? "대기 중";
   const autoStartedRef = useRef(false);
+
+  const changeDirection = useCallback((direction: -1 | 0 | 1) => {
+    if (inputDirectionRef.current === direction) return;
+    inputDirectionRef.current = direction;
+    connection.sendDirection(direction);
+  }, [connection.sendDirection]);
+
+  useEffect(() => {
+    inputDirectionRef.current = 0;
+  }, [activeRoomId]);
+
+  useEffect(() => {
+    const resetDirection = () => changeDirection(0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableTarget(event.target as HTMLElement | null)) {
+        resetDirection();
+        return;
+      }
+      const direction = directionForKey(event.key);
+      if (direction === null) return;
+      event.preventDefault();
+      changeDirection(direction);
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (directionForKey(event.key) === null) return;
+      event.preventDefault();
+      resetDirection();
+    };
+    const handleFocus = (event: FocusEvent) => {
+      if (isEditableTarget(event.target as HTMLElement | null)) resetDirection();
+    };
+    const handleVisibility = () => {
+      if (document.hidden) resetDirection();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", resetDirection);
+    window.addEventListener("focusin", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", resetDirection);
+      window.removeEventListener("focusin", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [changeDirection]);
 
   useEffect(() => () => closeCurrentSocket(), []);
 
@@ -260,6 +309,30 @@ export default function PlayPage() {
               <div className="text-2xl font-black text-ink">{score}</div>
             </div>
             <PongCanvas snapshot={activeSnapshot} />
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:hidden" aria-label="패들 조작">
+              <button
+                type="button"
+                className="focus-ring touch-none select-none rounded-lg border border-line bg-white px-4 py-4 font-black text-ink disabled:bg-slate-50 disabled:text-muted"
+                disabled={!canMove}
+                onPointerDown={() => changeDirection(-1)}
+                onPointerUp={() => changeDirection(0)}
+                onPointerCancel={() => changeDirection(0)}
+                onPointerLeave={() => changeDirection(0)}
+              >
+                <ArrowUp size={20} className="mr-2 inline" /> 위로
+              </button>
+              <button
+                type="button"
+                className="focus-ring touch-none select-none rounded-lg border border-line bg-white px-4 py-4 font-black text-ink disabled:bg-slate-50 disabled:text-muted"
+                disabled={!canMove}
+                onPointerDown={() => changeDirection(1)}
+                onPointerUp={() => changeDirection(0)}
+                onPointerCancel={() => changeDirection(0)}
+                onPointerLeave={() => changeDirection(0)}
+              >
+                <ArrowDown size={20} className="mr-2 inline" /> 아래로
+              </button>
+            </div>
           </section>
           <section className="grid gap-4 md:grid-cols-2">
             <div className="card p-5">
