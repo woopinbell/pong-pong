@@ -118,48 +118,6 @@ export default function PlayPage() {
     }
   }, [connection.connectQueue, connection.connectTournament]);
 
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") {
-        event.preventDefault();
-        directionRef.current = -1;
-      }
-      if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        directionRef.current = 1;
-      }
-    };
-    const stop = (event: KeyboardEvent) => {
-      if (["ArrowUp", "ArrowDown", "w", "W", "s", "S"].includes(event.key)) {
-        event.preventDefault();
-        directionRef.current = 0;
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    window.addEventListener("keyup", stop);
-    return () => {
-      window.removeEventListener("keydown", handleKey);
-      window.removeEventListener("keyup", stop);
-    };
-  }, [roomId]);
-
-  useEffect(() => {
-    if (!roomId || phase !== "playing") return;
-    const timer = window.setInterval(() => {
-      const socket = socketRef.current;
-      if (!socket || socket.readyState !== WebSocket.OPEN) return;
-      inputSequenceRef.current += 1;
-      socket.send(JSON.stringify({
-        v: 1,
-        type: "game.input",
-        roomId,
-        inputSeq: inputSequenceRef.current,
-        direction: directionRef.current
-      }));
-    }, 50);
-    return () => window.clearInterval(timer);
-  }, [roomId, phase]);
-
   function connect(mode: "queue" | "ai") {
     openGameSocket(mode === "ai" ? "인공지능 연습 방 생성 중" : "매칭 큐 참가 중", { type: "queue.join", mode });
   }
