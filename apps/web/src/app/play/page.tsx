@@ -8,45 +8,61 @@ import { directionForKey, isEditableTarget } from "@/game/gameInput";
 import { useGameConnection } from "@/game/useGameConnection";
 
 export default function PlayPage() {
-  const connection = useGameConnection();
   const {
-    state: connectionState,
+    state,
     connectQueue,
-    ready: readyWithHook,
-    sendChat: sendChatWithHook,
-    togglePause: togglePauseWithHook
-  } = connection;
+    connectTournament,
+    ready,
+    sendChat,
+    togglePause,
+    sendDirection
+  } = useGameConnection();
   const [chatInput, setChatInput] = useState("");
+  const autoStartedRef = useRef(false);
   const inputDirectionRef = useRef<-1 | 0 | 1>(0);
 
-  const activeSnapshot = connectionState.snapshot;
-  const activeRoomId = connectionState.roomId;
+  const { snapshot, roomId, messages } = state;
   const score = useMemo(
-    () => activeSnapshot ? `${activeSnapshot.state.leftScore} - ${activeSnapshot.state.rightScore}` : "경기 전",
-    [activeSnapshot]
+    () => snapshot ? `${snapshot.state.leftScore} - ${snapshot.state.rightScore}` : "경기 전",
+    [snapshot]
   );
-  const canReady = Boolean(activeRoomId && connectionState.status === "waitingReady");
+  const canReady = Boolean(roomId && state.status === "waitingReady");
   const canChat = Boolean(
-    activeRoomId
+    roomId
     && chatInput.trim()
-    && ["waitingReady", "playing", "paused"].includes(connectionState.status)
+    && ["waitingReady", "playing", "paused"].includes(state.status)
   );
-  const canPause = Boolean(activeRoomId && connectionState.status === "playing");
-  const canResume = Boolean(activeRoomId && connectionState.status === "paused");
-  const canMove = Boolean(activeRoomId && connectionState.status === "playing");
-  const opponent = activeSnapshot?.state.players.find((player) => player.side === "right");
-  const opponentName = connectionState.opponent ?? opponent?.displayName ?? "대기 중";
-  const autoStartedRef = useRef(false);
+  const canPause = Boolean(roomId && state.status === "playing");
+  const canResume = Boolean(roomId && state.status === "paused");
+  const canMove = Boolean(roomId && state.status === "playing");
+  const opponent = snapshot?.state.players.find((player) => player.side === "right");
+  const opponentName = state.opponent ?? opponent?.displayName ?? "대기 중";
 
   const changeDirection = useCallback((direction: -1 | 0 | 1) => {
     if (inputDirectionRef.current === direction) return;
     inputDirectionRef.current = direction;
-    connection.sendDirection(direction);
-  }, [connection.sendDirection]);
+    sendDirection(direction);
+  }, [sendDirection]);
 
   useEffect(() => {
     inputDirectionRef.current = 0;
-  }, [activeRoomId]);
+  }, [roomId]);
+
+  useEffect(() => {
+    if (autoStartedRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const tournamentMatchId = params.get("tournamentMatchId");
+    const mode = params.get("mode");
+    if (tournamentMatchId) {
+      autoStartedRef.current = true;
+      void connectTournament(tournamentMatchId);
+      return;
+    }
+    if (mode === "ai" || mode === "queue") {
+      autoStartedRef.current = true;
+      void connectQueue(mode);
+    }
+  }, [connectQueue, connectTournament]);
 
   useEffect(() => {
     const resetDirection = () => changeDirection(0);
@@ -86,22 +102,6 @@ export default function PlayPage() {
     };
   }, [changeDirection]);
 
-  useEffect(() => {
-    if (autoStartedRef.current) return;
-    const params = new URLSearchParams(window.location.search);
-    const tournamentMatchId = params.get("tournamentMatchId");
-    const mode = params.get("mode");
-    if (tournamentMatchId) {
-      autoStartedRef.current = true;
-      void connection.connectTournament(tournamentMatchId);
-      return;
-    }
-    if (mode === "ai" || mode === "queue") {
-      autoStartedRef.current = true;
-      void connection.connectQueue(mode);
-    }
-  }, [connection.connectQueue, connection.connectTournament]);
-
   function startQueue(mode: "queue" | "ai") {
     inputDirectionRef.current = 0;
     setChatInput("");
@@ -110,7 +110,7 @@ export default function PlayPage() {
 
   function submitChat(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (sendChatWithHook(chatInput)) setChatInput("");
+    if (sendChat(chatInput)) setChatInput("");
   }
 
   return (
@@ -120,7 +120,7 @@ export default function PlayPage() {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <h1 className="text-3xl font-black text-ink">경기장</h1>
-              <p className="mt-2 text-sm font-semibold text-muted">키보드 위쪽과 아래쪽 방향키로 패들을 움직입니다.</p>
+              <p className="mt-2 text-sm font-semibold text-muted">방향키나 W/S 키를 누르거나 화면 조작 버튼으로 패들을 움직입니다.</p>
             </div>
             <div className="flex gap-3">
               <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => startQueue("queue")}>
@@ -133,12 +133,12 @@ export default function PlayPage() {
           </div>
           <section className="card p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm font-black text-green-600">
-                <Signal size={18} /> {connectionState.notice}
+              <div className="flex items-center gap-2 text-sm font-black text-green-600" aria-live="polite">
+                <Signal size={18} /> {state.notice}
               </div>
               <div className="text-2xl font-black text-ink">{score}</div>
             </div>
-            <PongCanvas snapshot={activeSnapshot} />
+            <PongCanvas snapshot={snapshot} />
             <div className="mt-4 grid grid-cols-2 gap-3 sm:hidden" aria-label="패들 조작">
               <button
                 type="button"
@@ -170,7 +170,7 @@ export default function PlayPage() {
               <p className="mt-2 text-sm font-semibold text-muted">방이 잡히면 준비 버튼으로 경기를 시작합니다.</p>
               <button
                 className="focus-ring mt-4 rounded-lg border border-blue-200 px-4 py-2 text-sm font-black text-blue-700 disabled:cursor-not-allowed disabled:border-line disabled:text-muted"
-                onClick={readyWithHook}
+                onClick={ready}
                 disabled={!canReady}
               >
                 <Play size={16} className="mr-2 inline" />
@@ -182,7 +182,7 @@ export default function PlayPage() {
               <p className="mt-2 text-sm font-semibold text-muted">서버 경기 상태를 멈추거나 다시 시작합니다.</p>
               <button
                 className="focus-ring mt-4 rounded-lg border border-line bg-white px-4 py-2 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted"
-                onClick={togglePauseWithHook}
+                onClick={togglePause}
                 disabled={!canPause && !canResume}
               >
                 <Pause size={16} className="mr-2 inline" />
@@ -204,10 +204,10 @@ export default function PlayPage() {
               <MessageCircle size={20} /> 매치 채팅
             </h2>
             <div className="mt-4 grid gap-3">
-              {connectionState.messages.length === 0 ? (
+              {messages.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-line p-3 text-sm font-semibold text-muted">아직 매치 채팅이 없습니다.</div>
               ) : (
-                connectionState.messages.map((message, index) => (
+                messages.map((message, index) => (
                   <div key={`${message}-${index}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold text-muted">
                     {message}
                   </div>
