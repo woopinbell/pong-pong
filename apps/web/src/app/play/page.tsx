@@ -100,8 +100,6 @@ export default function PlayPage() {
     };
   }, [changeDirection]);
 
-  useEffect(() => () => closeCurrentSocket(), []);
-
   useEffect(() => {
     if (autoStartedRef.current) return;
     const params = new URLSearchParams(window.location.search);
@@ -117,45 +115,6 @@ export default function PlayPage() {
       void connection.connectQueue(mode);
     }
   }, [connection.connectQueue, connection.connectTournament]);
-
-  function ready() {
-    if (socketRef.current && canReady && roomId) {
-      socketRef.current.send(JSON.stringify({ v: 1, type: "game.ready", roomId }));
-      setStatus("준비 완료");
-    }
-  }
-
-  function sendChat(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const body = chatInput.trim();
-    if (!socketRef.current || !roomId || !body) return;
-    socketRef.current.send(JSON.stringify({ v: 1, type: "chat.send", scope: "match", roomId, body }));
-    setChatInput("");
-  }
-
-  function togglePause() {
-    if (!socketRef.current || !roomId) return;
-    if (canPause) {
-      socketRef.current.send(JSON.stringify({ v: 1, type: "game.pause", roomId }));
-      return;
-    }
-    if (canResume) {
-      socketRef.current.send(JSON.stringify({ v: 1, type: "game.resume", roomId }));
-    }
-  }
-
-  function closeCurrentSocket() {
-    ticketRequestRef.current?.abort();
-    ticketRequestRef.current = null;
-    const socket = socketRef.current;
-    if (!socket) return;
-    socket.onclose = null;
-    socket.onmessage = null;
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-    socketRef.current = null;
-  }
 
   function startQueue(mode: "queue" | "ai") {
     inputDirectionRef.current = 0;
