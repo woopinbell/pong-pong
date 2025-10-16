@@ -317,18 +317,45 @@ class PostgresRepository implements AppRepository {
   async requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary> {
     const addressee = await this.getUserByHandle(addresseeHandle);
     if (!addressee) throw new Error("friend not found");
+    if (requesterId === addressee.id) throw new Error("cannot friend yourself");
     const result = await sql<{ id: string; status: FriendSummary["status"] }>`
-      insert into friendships (requester_id, addressee_id, status) values (${requesterId}, ${addressee.id}, 'pending')
-      on conflict (requester_id, addressee_id) do update set updated_at = now() returning id, status
+      insert into friendships (requester_id, addressee_id, status)
+      values (${requesterId}, ${addressee.id}, 'pending')
+      on conflict (
+        (least(requester_id, addressee_id)),
+        (greatest(requester_id, addressee_id))
+      ) do update set
+        status = case
+          when friendships.status = 'pending'
+            and friendships.requester_id = excluded.addressee_id
+            and friendships.addressee_id = excluded.requester_id
+          then 'accepted'
+          else friendships.status
+        end,
+        updated_at = case
+          when friendships.status = 'pending'
+            and friendships.requester_id = excluded.addressee_id
+            and friendships.addressee_id = excluded.requester_id
+          then now()
+          else friendships.updated_at
+        end
+      returning id, status
     `.execute(this.db);
-    return { id: firstRow(result).id, status: firstRow(result).status, user: addressee };
+    const friendship = firstRow(result);
+    return { id: friendship.id, status: friendship.status, user: addressee };
   }
 
   async acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary> {
-    await sql`update friendships set status = 'accepted', updated_at = now() where id = ${friendshipId} and addressee_id = ${userId}`.execute(this.db);
-    const found = (await this.listFriends(userId)).find((friend) => friend.id === friendshipId);
-    if (!found) throw new Error("friendship not found");
-    return found;
+    const result = await sql<{ id: string; status: FriendSummary["status"]; requester_id: string }>`
+      update friendships
+      set status = 'accepted', updated_at = now()
+      where id = ${friendshipId} and addressee_id = ${userId}
+      returning id, status, requester_id
+    `.execute(this.db);
+    const friendship = firstRow(result);
+    const requester = await this.getUserById(friendship.requester_id);
+    if (!requester) throw new Error("friend not found");
+    return { id: friendship.id, status: friendship.status, user: requester };
   }
 
   async createMatch(input: CreateMatchInput): Promise<string> {
