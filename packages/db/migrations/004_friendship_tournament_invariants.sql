@@ -39,3 +39,21 @@ create unique index friendships_canonical_pair_unique
     least(requester_id, addressee_id),
     greatest(requester_id, addressee_id)
   );
+
+with ranked_entries as (
+  select
+    id,
+    row_number() over (
+      partition by tournament_id
+      order by seed asc, created_at asc, id asc
+    )::integer as next_seed
+  from tournament_entries
+)
+update tournament_entries as entry
+set seed = ranked.next_seed
+from ranked_entries as ranked
+where entry.id = ranked.id;
+
+alter table tournament_entries
+  add constraint tournament_entries_tournament_seed_unique
+  unique (tournament_id, seed);
