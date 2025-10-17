@@ -556,17 +556,48 @@ class PostgresRepository implements AppRepository {
   }
 
   async joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary> {
-    const count = await sql<{ count: string }>`select count(*)::text from tournament_entries where tournament_id = ${tournamentId}`.execute(this.db);
-    const status = await sql<{ capacity: number; joined: boolean }>`
-      select capacity, exists(select 1 from tournament_entries where tournament_id = ${tournamentId} and user_id = ${userId}) as joined
-      from tournaments where id = ${tournamentId} limit 1
-    `.execute(this.db);
-    const tournament = firstRow(status);
-    if (!tournament.joined && Number(firstRow(count).count) >= Number(tournament.capacity)) throw new Error("tournament full");
-    const seed = Number(firstRow(count).count) + 1;
-    await sql`insert into tournament_entries (tournament_id, user_id, seed) values (${tournamentId}, ${userId}, ${seed}) on conflict (tournament_id, user_id) do nothing`.execute(this.db);
-    await sql`update tournaments set status = case when (select count(*) from tournament_entries where tournament_id = ${tournamentId}) >= capacity then 'running' else status end where id = ${tournamentId}`.execute(this.db);
-    await this.ensureTournamentBracket(tournamentId);
+    await this.db.transaction().execute(async (transaction) => {
+      const tournament = await sql<{ capacity: number }>`
+        select capacity
+        from tournaments
+        where id = ${tournamentId}
+        for update
+      `.execute(transaction);
+      const tournamentRow = firstRow(tournament);
+      const existing = await sql<{ id: string }>`
+        select id
+        from tournament_entries
+        where tournament_id = ${tournamentId} and user_id = ${userId}
+        limit 1
+      `.execute(transaction);
+      if (existing.rows[0]) return;
+
+      const entryState = await sql<{ count: number; next_seed: number }>`
+        select
+          count(*)::integer as count,
+          (coalesce(max(seed), 0) + 1)::integer as next_seed
+        from tournament_entries
+        where tournament_id = ${tournamentId}
+      `.execute(transaction);
+      const state = firstRow(entryState);
+      if (Number(state.count) >= Number(tournamentRow.capacity)) {
+        throw new Error("tournament full");
+      }
+
+      await sql`
+        insert into tournament_entries (tournament_id, user_id, seed)
+        values (${tournamentId}, ${userId}, ${state.next_seed})
+      `.execute(transaction);
+      const playerCount = Number(state.count) + 1;
+      if (playerCount >= Number(tournamentRow.capacity)) {
+        await sql`
+          update tournaments
+          set status = 'running'
+          where id = ${tournamentId}
+        `.execute(transaction);
+        await this.ensureTournamentBracket(tournamentId, transaction);
+      }
+    });
     const found = (await this.listTournaments()).find((item) => item.id === tournamentId);
     if (!found) throw new Error("tournament not found");
     return found;
@@ -630,10 +661,10 @@ class PostgresRepository implements AppRepository {
     return summary;
   }
 
-  private async ensureTournamentBracket(tournamentId: string): Promise<void> {
+  private async ensureTournamentBracket(tournamentId: string, executor: Kysely<Database> = this.db): Promise<void> {
     const entries = await sql<{ user_id: string; seed: number }>`
       select user_id, seed from tournament_entries where tournament_id = ${tournamentId} order by seed asc
-    `.execute(this.db);
+    `.execute(executor);
     if (entries.rows.length < 4) return;
     await sql`
       insert into tournament_matches (tournament_id, round, slot, left_user_id, right_user_id, status)
@@ -641,7 +672,7 @@ class PostgresRepository implements AppRepository {
         (${tournamentId}, 'semifinal', 1, ${entries.rows[0].user_id}, ${entries.rows[3].user_id}, 'ready'),
         (${tournamentId}, 'semifinal', 2, ${entries.rows[1].user_id}, ${entries.rows[2].user_id}, 'ready')
       on conflict (tournament_id, round, slot) do nothing
-    `.execute(this.db);
+    `.execute(executor);
   }
 
   async listAdminUsers(): Promise<PublicUser[]> {
