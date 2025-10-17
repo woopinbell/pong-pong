@@ -66,7 +66,12 @@ describe("PostgreSQL integration", () => {
         "ws_tickets"
       ]));
       const firstMigrations = await appliedMigrations(pool);
-      expect(firstMigrations).toEqual(["001_initial", "002_ws_tickets", "003_match_finalization"]);
+      expect(firstMigrations).toEqual([
+        "001_initial",
+        "002_ws_tickets",
+        "003_match_finalization",
+        "004_friendship_tournament_invariants"
+      ]);
 
       await migrateDatabase(databaseUrl);
 
@@ -393,6 +398,124 @@ describe("PostgreSQL integration", () => {
           (select count(*)::integer from tournament_matches where tournament_id = $1 and round = 'final') as finals
       `, [tournament.id]);
       expect(counts.rows[0]).toEqual({ matches: 2, history: 4, finals: 1 });
+    });
+  });
+
+  it("enforces one friendship across both request directions", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const firstUser = await repository.upsertDevUser({
+        handle: "pg-friend-first",
+        displayName: "Postgres Friend One"
+      });
+      const secondUser = await repository.upsertDevUser({
+        handle: "pg-friend-second",
+        displayName: "Postgres Friend Two"
+      });
+
+      await expect(repository.requestFriend(firstUser.id, firstUser.handle)).rejects.toThrow("cannot friend yourself");
+
+      const firstRequest = await repository.requestFriend(firstUser.id, secondUser.handle);
+      const repeatedRequest = await repository.requestFriend(firstUser.id, secondUser.handle);
+      const reverseRequest = await repository.requestFriend(secondUser.id, firstUser.handle);
+
+      expect(firstRequest.status).toBe("pending");
+      expect(repeatedRequest).toEqual(firstRequest);
+      expect(reverseRequest).toEqual(expect.objectContaining({
+        id: firstRequest.id,
+        status: "accepted",
+        user: expect.objectContaining({ id: firstUser.id })
+      }));
+      await expect(repository.listFriends(firstUser.id)).resolves.toEqual([
+        expect.objectContaining({ id: firstRequest.id, status: "accepted", user: expect.objectContaining({ id: secondUser.id }) })
+      ]);
+      await expect(repository.listFriends(secondUser.id)).resolves.toEqual([
+        expect.objectContaining({ id: firstRequest.id, status: "accepted", user: expect.objectContaining({ id: firstUser.id }) })
+      ]);
+
+      const stored = await pool.query<{
+        requester_id: string;
+        addressee_id: string;
+        status: string;
+      }>("select requester_id, addressee_id, status from friendships");
+      expect(stored.rows).toEqual([{
+        requester_id: firstUser.id,
+        addressee_id: secondUser.id,
+        status: "accepted"
+      }]);
+
+      await expect(pool.query(
+        "insert into friendships (requester_id, addressee_id, status) values ($1, $1, 'pending')",
+        [firstUser.id]
+      )).rejects.toMatchObject({ constraint: "friendships_distinct_users_check" });
+    });
+  });
+
+  it("admits exactly one of ten concurrent requests into the final tournament slot", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const creator = await repository.upsertDevUser({
+        handle: "pg-capacity-owner",
+        displayName: "Postgres Capacity Owner"
+      });
+      const earlyEntries = await Promise.all(
+        ["pg-capacity-two", "pg-capacity-three"].map((handle) =>
+          repository.upsertDevUser({ handle, displayName: handle })
+        )
+      );
+      const candidates = await Promise.all(
+        Array.from({ length: 10 }, (_, index) =>
+          repository.upsertDevUser({
+            handle: `pg-capacity-candidate-${index}`,
+            displayName: `Postgres Candidate ${index}`
+          })
+        )
+      );
+      const tournament = await repository.createTournament({
+        name: "Postgres Final Slot",
+        createdBy: creator.id
+      });
+      await repository.joinTournament(tournament.id, earlyEntries[0].id);
+      await repository.joinTournament(tournament.id, earlyEntries[1].id);
+
+      const attempts = await Promise.allSettled(
+        candidates.map((candidate) => repository.joinTournament(tournament.id, candidate.id))
+      );
+      const accepted = attempts.filter((attempt) => attempt.status === "fulfilled");
+      const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+
+      expect(accepted).toHaveLength(1);
+      expect(rejected).toHaveLength(9);
+      expect(rejected.every((attempt) => String(attempt.reason).includes("tournament full"))).toBe(true);
+
+      const entries = await pool.query<{ user_id: string; seed: number }>(
+        "select user_id, seed from tournament_entries where tournament_id = $1 order by seed",
+        [tournament.id]
+      );
+      const matches = await pool.query<{ round: string; slot: number }>(
+        "select round, slot from tournament_matches where tournament_id = $1 order by round, slot",
+        [tournament.id]
+      );
+      expect(entries.rows).toHaveLength(4);
+      expect(entries.rows.map((entry) => entry.seed)).toEqual([1, 2, 3, 4]);
+      expect(new Set(entries.rows.map((entry) => entry.user_id)).size).toBe(4);
+      expect(matches.rows).toEqual([
+        { round: "semifinal", slot: 1 },
+        { round: "semifinal", slot: 2 }
+      ]);
+
+      const acceptedUserId = entries.rows.find((entry) => candidates.some((candidate) => candidate.id === entry.user_id))?.user_id;
+      await expect(repository.joinTournament(tournament.id, acceptedUserId ?? "")).resolves.toMatchObject({
+        playerCount: 4
+      });
+      const unchanged = await pool.query<{ entries: number; matches: number }>(`
+        select
+          (select count(*)::integer from tournament_entries where tournament_id = $1) as entries,
+          (select count(*)::integer from tournament_matches where tournament_id = $1) as matches
+      `, [tournament.id]);
+      expect(unchanged.rows[0]).toEqual({ entries: 4, matches: 2 });
     });
   });
 

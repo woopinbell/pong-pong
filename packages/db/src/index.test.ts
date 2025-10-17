@@ -163,6 +163,71 @@ describe("memory repository", () => {
     expect((await repo.listTournaments())[0].name).toBe("테스트 컵");
   });
 
+  it("keeps one friendship for both request directions", async () => {
+    const repo = createMemoryRepository();
+    const firstUser = await repo.upsertDevUser({ handle: "friend-first", displayName: "첫 번째 사용자" });
+    const secondUser = await repo.upsertDevUser({ handle: "friend-second", displayName: "두 번째 사용자" });
+
+    await expect(repo.requestFriend(firstUser.id, firstUser.handle)).rejects.toThrow("cannot friend yourself");
+
+    const firstRequest = await repo.requestFriend(firstUser.id, secondUser.handle);
+    const repeatedRequest = await repo.requestFriend(firstUser.id, secondUser.handle);
+    const reverseRequest = await repo.requestFriend(secondUser.id, firstUser.handle);
+
+    expect(firstRequest.status).toBe("pending");
+    expect(repeatedRequest).toEqual(firstRequest);
+    expect(reverseRequest.id).toBe(firstRequest.id);
+    expect(reverseRequest.status).toBe("accepted");
+    expect(reverseRequest.user.id).toBe(firstUser.id);
+    await expect(repo.listFriends(firstUser.id)).resolves.toEqual([
+      expect.objectContaining({ id: firstRequest.id, status: "accepted", user: expect.objectContaining({ id: secondUser.id }) })
+    ]);
+    await expect(repo.listFriends(secondUser.id)).resolves.toEqual([
+      expect.objectContaining({ id: firstRequest.id, status: "accepted", user: expect.objectContaining({ id: firstUser.id }) })
+    ]);
+  });
+
+  it("admits one of ten users into the final tournament slot", async () => {
+    const repo = createMemoryRepository();
+    const creator = await repo.upsertDevUser({ handle: "memory-capacity-owner", displayName: "개설자" });
+    const earlyEntries = await Promise.all(
+      ["memory-capacity-two", "memory-capacity-three"].map((handle) =>
+        repo.upsertDevUser({ handle, displayName: handle })
+      )
+    );
+    const candidates = await Promise.all(
+      Array.from({ length: 10 }, (_, index) =>
+        repo.upsertDevUser({ handle: `memory-candidate-${index}`, displayName: `후보 ${index}` })
+      )
+    );
+    const tournament = await repo.createTournament({ name: "마지막 자리", createdBy: creator.id });
+    await repo.joinTournament(tournament.id, earlyEntries[0].id);
+    await repo.joinTournament(tournament.id, earlyEntries[1].id);
+
+    const attempts = await Promise.allSettled(
+      candidates.map((candidate) => repo.joinTournament(tournament.id, candidate.id))
+    );
+    const accepted = attempts.filter((attempt) => attempt.status === "fulfilled");
+    const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+    const completed = (await repo.listTournaments()).find((item) => item.id === tournament.id);
+    const semifinalSlots = completed?.matches
+      .filter((match) => match.round === "semifinal")
+      .map((match) => match.slot)
+      .sort() ?? [];
+
+    expect(accepted).toHaveLength(1);
+    expect(rejected).toHaveLength(9);
+    expect(rejected.every((attempt) => String(attempt.reason).includes("tournament full"))).toBe(true);
+    expect(completed?.playerCount).toBe(4);
+    expect(new Set(completed?.entries.map((entry) => entry.id)).size).toBe(4);
+    expect(semifinalSlots).toEqual([1, 2]);
+
+    const acceptedUser = completed?.entries.find((entry) => candidates.some((candidate) => candidate.id === entry.id));
+    await expect(repo.joinTournament(tournament.id, acceptedUser?.id ?? "")).resolves.toMatchObject({
+      playerCount: 4
+    });
+  });
+
   it("consumes websocket tickets once and rejects expired or suspended users", async () => {
     const repo = createMemoryRepository();
     const user = await repo.upsertDevUser({ handle: "ws-user", displayName: "WS 사용자" });
