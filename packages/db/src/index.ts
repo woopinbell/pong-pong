@@ -7,6 +7,13 @@ import type { AdminActionRow, ChatMessageRow, ChatMessageWithSenderRow, Database
 
 export type { Database } from "./schema";
 
+type MemoryFriendship = {
+  id: string;
+  requesterId: string;
+  addresseeId: string;
+  status: FriendSummary["status"];
+};
+
 export interface DevLoginInput {
   handle: string;
   displayName: string;
@@ -701,7 +708,7 @@ class MemoryRepository implements AppRepository {
   private readonly sessions = new Map<string, string>();
   private readonly wsTickets = new Map<string, { userId: string; expiresAt: number }>();
   private readonly matches: MemoryMatchRecord[] = [];
-  private readonly friendships: FriendSummary[] = [];
+  private readonly friendships: MemoryFriendship[] = [];
   private readonly chats: ChatMessage[] = [];
   private readonly tournaments: TournamentSummary[] = [];
   private readonly adminActions: AdminActionSummary[] = [];
@@ -853,21 +860,55 @@ class MemoryRepository implements AppRepository {
     return { me: { ...user, email: null }, recentMatches, winRate: percentage(user.wins, user.losses), bestStreak: bestWinningStreak(recentMatches) };
   }
 
-  async listFriends(): Promise<FriendSummary[]> { return this.friendships; }
-
-  async requestFriend(_requesterId: string, addresseeHandle: string): Promise<FriendSummary> {
-    const user = await this.getUserByHandle(addresseeHandle);
-    if (!user) throw new Error("friend not found");
-    const friend = { id: randomUUID(), user, status: "pending" as const };
-    this.friendships.push(friend);
-    return friend;
+  async listFriends(userId: string): Promise<FriendSummary[]> {
+    return this.friendships
+      .filter((friendship) => friendship.requesterId === userId || friendship.addresseeId === userId)
+      .map((friendship) => {
+        const otherUserId = friendship.requesterId === userId
+          ? friendship.addresseeId
+          : friendship.requesterId;
+        const otherUser = this.users.get(otherUserId);
+        if (!otherUser) throw new Error("friend not found");
+        return {
+          id: friendship.id,
+          status: friendship.status,
+          user: toPublicUser(otherUser, true)
+        };
+      });
   }
 
-  async acceptFriend(_userId: string, friendshipId: string): Promise<FriendSummary> {
+  async requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary> {
+    const user = await this.getUserByHandle(addresseeHandle);
+    if (!user) throw new Error("friend not found");
+    if (requesterId === user.id) throw new Error("cannot friend yourself");
+    const existing = this.friendships.find((friendship) =>
+      (friendship.requesterId === requesterId && friendship.addresseeId === user.id)
+      || (friendship.requesterId === user.id && friendship.addresseeId === requesterId)
+    );
+    if (existing) {
+      const isReversePending = existing.status === "pending"
+        && existing.requesterId === user.id
+        && existing.addresseeId === requesterId;
+      if (isReversePending) existing.status = "accepted";
+      return { id: existing.id, status: existing.status, user };
+    }
+    const friendship: MemoryFriendship = {
+      id: randomUUID(),
+      requesterId,
+      addresseeId: user.id,
+      status: "pending"
+    };
+    this.friendships.push(friendship);
+    return { id: friendship.id, status: friendship.status, user };
+  }
+
+  async acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary> {
     const friend = this.friendships.find((item) => item.id === friendshipId);
-    if (!friend) throw new Error("friendship not found");
+    if (!friend || friend.addresseeId !== userId) throw new Error("friendship not found");
     friend.status = "accepted";
-    return friend;
+    const requester = this.users.get(friend.requesterId);
+    if (!requester) throw new Error("friend not found");
+    return { id: friend.id, status: friend.status, user: toPublicUser(requester, true) };
   }
 
   async createMatch(input: CreateMatchInput): Promise<string> {
