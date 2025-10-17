@@ -1021,8 +1021,9 @@ class MemoryRepository implements AppRepository {
 
   async joinTournament(tournamentId: string, userId: string): Promise<TournamentSummary> {
     const tournament = this.tournaments.find((item) => item.id === tournamentId);
-    const user = await this.getUserById(userId);
-    if (!tournament || !user) throw new Error("tournament not found");
+    const rawUser = this.users.get(userId);
+    if (!tournament || !rawUser) throw new Error("tournament not found");
+    const user = toPublicUser(rawUser, true);
     const joined = tournament.entries.some((entry) => entry.id === user.id);
     if (!joined && tournament.entries.length >= tournament.capacity) throw new Error("tournament full");
     if (!joined) tournament.entries.push(user);
