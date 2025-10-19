@@ -13,6 +13,10 @@ import {
   type ServerEvent,
   type SessionUser
 } from "@pong-pong/shared";
+import { DEFAULT_TIMESTEP_MS, FixedStepScheduler } from "./game/fixedStepScheduler";
+import { ConnectionHeartbeat } from "./game/heartbeat";
+import { InputGate } from "./game/inputGate";
+import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestSnapshotBuffer";
 import { PongAi } from "./game/pongAi";
 import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
 
@@ -42,7 +46,7 @@ type Room = {
   ai: boolean;
   ready: Partial<Record<PlayerSide, boolean>>;
   snapshot: GameSnapshot;
-  timer: NodeJS.Timeout | null;
+  scheduler: FixedStepScheduler | null;
   mode: MatchMode;
   tournamentMatchId: string | null;
   npcUser: PublicUser | null;
@@ -52,7 +56,7 @@ type Room = {
 };
 
 const NPC_QUEUE_FALLBACK_MS = 6000;
-const SIMULATION_TIMESTEP_MS = 50;
+const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
@@ -290,7 +294,7 @@ export class GameHub {
       clients: { left, ...(right ? { right } : {}) },
       ai: options.ai,
       ready: {},
-      timer: null,
+      scheduler: null,
       mode: options.mode,
       tournamentMatchId: options.tournamentMatchId ?? null,
       npcUser,
@@ -348,9 +352,9 @@ export class GameHub {
       if (player.side === side) player.ready = true;
     }
     if (room.ai) room.ready.right = true;
-    if (room.ready.left && room.ready.right && !room.timer) {
+    if (room.ready.left && room.ready.right && room.snapshot.state.phase === "waiting") {
       room.snapshot.state.phase = "playing";
-      room.timer = setInterval(() => this.tick(room).catch(() => undefined), SIMULATION_TIMESTEP_MS);
+      this.startRoomScheduler(room);
     }
     this.broadcastSnapshot(room);
   }
@@ -369,8 +373,7 @@ export class GameHub {
   private pauseRoom(client: Client, roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room || room.snapshot.state.phase !== "playing" || !sideFor(room, client)) return;
-    if (room.timer) clearInterval(room.timer);
-    room.timer = null;
+    room.scheduler?.stop();
     room.snapshot.state.phase = "paused";
     this.broadcastSnapshot(room);
   }
@@ -379,13 +382,20 @@ export class GameHub {
     const room = this.rooms.get(roomId);
     if (!room || room.snapshot.state.phase !== "paused" || !sideFor(room, client)) return;
     room.snapshot.state.phase = "playing";
-    if (!room.timer) {
-      room.timer = setInterval(() => this.tick(room).catch(() => undefined), SIMULATION_TIMESTEP_MS);
-    }
+    this.startRoomScheduler(room);
     this.broadcastSnapshot(room);
   }
 
-  private async tick(room: Room): Promise<void> {
+  private startRoomScheduler(room: Room): void {
+    room.scheduler ??= new FixedStepScheduler(() => this.tick(room), {
+      timestepMs: SIMULATION_TIMESTEP_MS,
+      maxTicksPerLoop: 5,
+      maxAccumulatedMs: 250
+    });
+    room.scheduler.start();
+  }
+
+  private tick(room: Room): void {
     if (room.snapshot.state.phase !== "playing") return;
     const rightDirection = room.aiController
       ? room.aiController.nextDirection(room.simulation)
@@ -398,7 +408,7 @@ export class GameHub {
     this.broadcastSnapshot(room);
 
     if (room.simulation.phase === "finished" && room.simulation.winnerSide) {
-      await this.finishRoom(room, room.simulation.winnerSide);
+      this.finishRoom(room, room.simulation.winnerSide).catch(() => undefined);
     }
   }
 
@@ -413,8 +423,7 @@ export class GameHub {
   }
 
   private async finalizeRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
-    if (room.timer) clearInterval(room.timer);
-    room.timer = null;
+    room.scheduler?.stop();
     room.snapshot.state.phase = "finished";
     const leftUser = room.clients.left?.user ?? null;
     const rightUser = room.clients.right?.user ?? room.npcUser ?? null;
