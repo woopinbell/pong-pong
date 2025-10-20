@@ -25,7 +25,8 @@ type Client = {
   socket: WebSocket;
   user: SessionUser;
   roomId: string | null;
-  lastInputSequenceByRoom: Map<string, number>;
+  heartbeat: ConnectionHeartbeat;
+  snapshots: LatestSnapshotBuffer;
 };
 
 type VersionlessServerEvent = ServerEvent extends infer Event
@@ -64,20 +65,30 @@ export class GameHub {
   private readonly rooms = new Map<string, Room>();
   private readonly tournamentWaiters = new Map<string, Client[]>();
   private readonly waitSamples: number[] = [];
+  private readonly inputGate = new InputGate();
 
   constructor(private readonly repo: AppRepository) {}
 
-  connect(socket: WebSocket, request: IncomingMessage, user: SessionUser, pendingPayloads: string[] = []): void {
+  connect(socket: WebSocket, _request: IncomingMessage, user: SessionUser, pendingPayloads: string[] = []): void {
+    const heartbeat = new ConnectionHeartbeat({
+      ping: () => {
+        if (socket.readyState === WebSocket.OPEN) socket.ping();
+      },
+      terminate: () => socket.terminate()
+    });
     const client: Client = {
       id: randomUUID(),
       socket,
       user,
       roomId: null,
-      lastInputSequenceByRoom: new Map()
+      heartbeat,
+      snapshots: new LatestSnapshotBuffer(socket)
     };
     this.clients.set(client.id, client);
     socket.on("message", (payload) => this.receive(client, payload.toString()));
+    socket.on("pong", () => heartbeat.acknowledge());
     socket.on("close", () => this.disconnect(client));
+    heartbeat.start();
     this.broadcastPresence();
     for (const payload of pendingPayloads) {
       this.receive(client, payload).catch(() => undefined);
@@ -117,9 +128,15 @@ export class GameHub {
   }
 
   private disconnect(client: Client): void {
+    if (!this.clients.has(client.id)) return;
+    client.heartbeat.stop();
+    client.snapshots.close();
     this.leaveQueue(client);
     this.leaveTournamentWaiters(client);
     this.clients.delete(client.id);
+    if (![...this.clients.values()].some((candidate) => candidate.user.id === client.user.id)) {
+      this.inputGate.releaseUser(client.user.id);
+    }
     if (client.roomId) {
       const room = this.rooms.get(client.roomId);
       if (room) {
@@ -364,9 +381,21 @@ export class GameHub {
     if (!room || room.snapshot.state.phase !== "playing") return;
     const side = sideFor(room, client);
     if (!side) return;
-    const previousSequence = client.lastInputSequenceByRoom.get(roomId) ?? -1;
-    if (inputSeq <= previousSequence) return;
-    client.lastInputSequenceByRoom.set(roomId, inputSeq);
+    const decision = this.inputGate.check({
+      userId: client.user.id,
+      roomId,
+      inputSeq,
+      nowMs: performance.now()
+    });
+    if (decision === "stale") return;
+    if (decision === "rate_limited") {
+      this.send(client, {
+        type: "error",
+        code: "rate_limited",
+        message: "게임 입력 전송 한도를 초과했습니다."
+      });
+      return;
+    }
     room.snapshot.state.paddles[side].dy = direction;
   }
 
