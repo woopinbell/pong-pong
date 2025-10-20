@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@pong-pong/shared": "workspace:*",
+    "@tanstack/react-query": "^5.101.4",
     "lucide-react": "^0.511.0",
     "next": "^15.3.2",
     "react": "^19.1.0",
