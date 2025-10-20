@@ -516,9 +516,19 @@ export class GameHub {
   }
 
   private send(client: Client, event: VersionlessServerEvent): void {
-    if (client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(encodeServerEvent({ ...event, v: 1 } as ServerEvent));
+    if (client.socket.readyState !== WebSocket.OPEN) return;
+    const payload = encodeServerEvent({ ...event, v: 1 } as ServerEvent);
+    if (event.type === "game.snapshot") {
+      client.snapshots.enqueue(payload);
+      return;
     }
+    if (client.socket.bufferedAmount >= HARD_BUFFERED_AMOUNT_BYTES) {
+      client.socket.terminate();
+      return;
+    }
+    client.socket.send(payload, (error) => {
+      if (error && client.socket.readyState === WebSocket.OPEN) client.socket.terminate();
+    });
   }
 }
 
