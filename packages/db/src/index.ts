@@ -1,9 +1,44 @@
 import { randomUUID } from "node:crypto";
-import { Kysely, PostgresDialect, sql } from "kysely";
+import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import { Pool } from "pg";
-import type { AdminActionSummary, ChatMessage, DashboardSummary, FriendSummary, LeaderboardEntry, MatchMode, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary, UserRole } from "@pong-pong/shared";
-import { toAdminActionSummary, toChatMessage, toFriendSummary, toMatchSummary, toPublicUser, toSessionUser, toTournamentMatchRecord, toTournamentMatchSummary, toTournamentSummary } from "./rowMappers";
-import type { AdminActionRow, ChatMessageRow, ChatMessageWithSenderRow, Database, FriendshipWithUserRow, MatchWithHandlesRow, MemoryUserRow, TournamentMatchRow, TournamentRow, TournamentWithCreatorRow, UserRow } from "./schema";
+import type {
+  ChatMessage,
+  DashboardSummary,
+  FriendSummary,
+  AdminActionSummary,
+  LeaderboardEntry,
+  MatchMode,
+  MatchSummary,
+  PublicUser,
+  SessionUser,
+  TournamentMatchSummary,
+  TournamentSummary,
+  UserRole
+} from "@pong-pong/shared";
+import {
+  toAdminActionSummary,
+  toChatMessage,
+  toFriendSummary,
+  toMatchSummary,
+  toPublicUser,
+  toSessionUser,
+  toTournamentMatchRecord,
+  toTournamentMatchSummary,
+  toTournamentSummary
+} from "./rowMappers";
+import type {
+  AdminActionRow,
+  ChatMessageRow,
+  ChatMessageWithSenderRow,
+  Database,
+  FriendshipWithUserRow,
+  MatchWithHandlesRow,
+  TournamentMatchRow,
+  TournamentRow,
+  TournamentWithCreatorRow,
+  UserProjectionRow,
+  UserRow
+} from "./schema";
 
 export type { Database } from "./schema";
 
@@ -704,7 +739,7 @@ class PostgresRepository implements AppRepository {
 }
 
 class MemoryRepository implements AppRepository {
-  private readonly users = new Map<string, MemoryUserRow>();
+  private readonly users = new Map<string, UserProjectionRow>();
   private readonly sessions = new Map<string, string>();
   private readonly wsTickets = new Map<string, { userId: string; expiresAt: number }>();
   private readonly matches: MemoryMatchRecord[] = [];
@@ -733,7 +768,19 @@ class MemoryRepository implements AppRepository {
     }
     for (const npc of NPC_PLAYERS) {
       const existing = [...this.users.values()].find((user) => user.handle === npc.handle);
-      const user: MemoryUserRow = existing ?? { id: randomUUID(), email: null, handle: npc.handle, display_name: npc.displayName, avatar_key: npc.avatarKey, role: "user", status: "active", rating: npc.rating, wins: 0, losses: 0, is_npc: true };
+      const user: UserProjectionRow = existing ?? {
+        id: randomUUID(),
+        email: null,
+        handle: npc.handle,
+        display_name: npc.displayName,
+        avatar_key: npc.avatarKey,
+        role: "user",
+        status: "active",
+        rating: npc.rating,
+        wins: 0,
+        losses: 0,
+        is_npc: true
+      };
       user.display_name = npc.displayName;
       user.avatar_key = npc.avatarKey;
       user.rating = npc.rating;
@@ -746,7 +793,7 @@ class MemoryRepository implements AppRepository {
   async upsertDevUser(input: DevLoginInput): Promise<SessionUser> {
     const handle = normalizeHandle(input.handle);
     const existing = [...this.users.values()].find((user) => user.handle === handle);
-    const user: MemoryUserRow = existing ?? {
+    const user: UserProjectionRow = existing ?? {
       id: randomUUID(),
       email: input.email ?? `${handle}@dev.pong-pong.local`,
       handle,
