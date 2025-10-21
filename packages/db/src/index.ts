@@ -49,6 +49,17 @@ type MemoryFriendship = {
   status: FriendSummary["status"];
 };
 
+type MemoryMatchRecord = {
+  id: string;
+  resultKey: string;
+  mode: MatchMode;
+  winnerId: string | null;
+  loserId: string | null;
+  scoreLeft: number;
+  scoreRight: number;
+  endedAt: string;
+};
+
 export interface DevLoginInput {
   handle: string;
   displayName: string;
@@ -92,12 +103,6 @@ export interface FinalizeMatchResult {
   resultKey: string;
   created: boolean;
 }
-
-type MemoryMatchRecord = CreateMatchInput & {
-  id: string;
-  ended_at: string;
-  resultKey: string;
-};
 
 export interface TournamentMatchRecord {
   id: string;
@@ -1012,10 +1017,16 @@ class MemoryRepository implements AppRepository {
 
     const matchId = randomUUID();
     this.matches.push({
-      ...command,
       id: matchId,
-      ended_at: new Date().toISOString()
+      resultKey: command.resultKey,
+      mode: command.mode,
+      winnerId: command.winnerId,
+      loserId: command.loserId,
+      scoreLeft: command.scoreLeft,
+      scoreRight: command.scoreRight,
+      endedAt: new Date().toISOString()
     });
+
     if (winner) {
       winner.wins += 1;
       winner.rating += 16;
@@ -1205,20 +1216,6 @@ function percentage(wins: number, losses: number): number {
   return Math.round((Number(wins) / total) * 1000) / 10;
 }
 
-function memoryMatchSummary(row: MemoryMatchRecord, userId?: string): MatchSummary {
-  const won = userId ? row.winnerId === userId : true;
-  return {
-    id: row.id,
-    mode: row.mode,
-    opponentHandle: "AI",
-    result: won ? "win" : "loss",
-    scoreLeft: row.scoreLeft,
-    scoreRight: row.scoreRight,
-    ratingDelta: won ? 16 : -12,
-    endedAt: new Date(row.ended_at).toISOString()
-  };
-}
-
 function bestWinningStreak(matches: MatchSummary[]): number {
   let best = 0;
   let current = 0;
@@ -1233,6 +1230,33 @@ function bestWinningStreak(matches: MatchSummary[]): number {
   return best;
 }
 
+function memoryMatchSummary(row: MemoryMatchRecord, userId?: string): MatchSummary {
+  const won = userId ? row.winnerId === userId : true;
+  return {
+    id: row.id,
+    mode: row.mode,
+    opponentHandle: "AI",
+    result: won ? "win" : "loss",
+    scoreLeft: row.scoreLeft,
+    scoreRight: row.scoreRight,
+    ratingDelta: won ? 16 : -12,
+    endedAt: row.endedAt
+  };
+}
+
 function memoryTournamentMatch(tournamentId: string, round: "semifinal" | "final", slot: number, left: PublicUser | null, right: PublicUser | null): TournamentMatchSummary {
-  return { id: randomUUID(), tournamentId, round, slot, status: "ready", left, right, winner: null, scoreLeft: null, scoreRight: null, roomId: null, matchId: null };
+  return {
+    id: randomUUID(),
+    tournamentId,
+    round,
+    slot,
+    status: "ready",
+    left,
+    right,
+    winner: null,
+    scoreLeft: null,
+    scoreRight: null,
+    roomId: null,
+    matchId: null
+  };
 }
