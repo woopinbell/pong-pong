@@ -1,5 +1,16 @@
+import type {
+  FriendshipStatus,
+  MatchMode,
+  TournamentStatus,
+  UserRole,
+  UserStatus
+} from "@pong-pong/shared";
 import type { Generated, Selectable } from "kysely";
-import type { UserRole, UserStatus } from "@pong-pong/shared";
+
+export type TournamentRound = "semifinal" | "final";
+export type TournamentMatchStatus = "pending" | "ready" | "running" | "finished";
+export type ChatScope = "lobby" | "match";
+export type AdminAction = "ban" | "unban";
 
 export interface UserTable {
   id: Generated<string>;
@@ -24,17 +35,19 @@ export interface SessionTable {
   created_at: Generated<Date>;
 }
 
-export interface WsTicketTable {
-  ticket_hash: string;
-  user_id: string;
-  expires_at: Date;
+export interface FriendshipTable {
+  id: Generated<string>;
+  requester_id: string;
+  addressee_id: string;
+  status: FriendshipStatus;
   created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface MatchTable {
   id: Generated<string>;
   result_key: string;
-  mode: import("@pong-pong/shared").MatchMode;
+  mode: MatchMode;
   winner_id: string | null;
   loser_id: string | null;
   score_left: number;
@@ -44,18 +57,9 @@ export interface MatchTable {
   ended_at: Generated<Date>;
 }
 
-export interface FriendshipTable {
-  id: Generated<string>;
-  requester_id: string;
-  addressee_id: string;
-  status: import("@pong-pong/shared").FriendshipStatus;
-  created_at: Generated<Date>;
-  updated_at: Generated<Date>;
-}
-
 export interface ChatMessageTable {
   id: Generated<string>;
-  scope: "lobby" | "match";
+  scope: ChatScope;
   room_id: string | null;
   sender_id: string;
   body: string;
@@ -65,7 +69,7 @@ export interface ChatMessageTable {
 export interface TournamentTable {
   id: Generated<string>;
   name: string;
-  status: Generated<import("@pong-pong/shared").TournamentStatus>;
+  status: Generated<TournamentStatus>;
   created_by: string;
   winner_id: string | null;
   capacity: Generated<number>;
@@ -83,9 +87,9 @@ export interface TournamentEntryTable {
 export interface TournamentMatchTable {
   id: Generated<string>;
   tournament_id: string;
-  round: "semifinal" | "final";
+  round: TournamentRound;
   slot: number;
-  status: Generated<"pending" | "ready" | "running" | "finished">;
+  status: Generated<TournamentMatchStatus>;
   left_user_id: string | null;
   right_user_id: string | null;
   winner_id: string | null;
@@ -101,8 +105,15 @@ export interface AdminActionTable {
   id: Generated<string>;
   actor_id: string | null;
   target_user_id: string | null;
-  action: "ban" | "unban";
+  action: AdminAction;
   reason: string;
+  created_at: Generated<Date>;
+}
+
+export interface WsTicketTable {
+  ticket_hash: string;
+  user_id: string;
+  expires_at: Date;
   created_at: Generated<Date>;
 }
 
@@ -116,66 +127,21 @@ export interface RatingHistoryTable {
   created_at: Generated<Date>;
 }
 
-export type AdminActionRow = Selectable<AdminActionTable>;
-
 export interface Database {
   users: UserTable;
   sessions: SessionTable;
-  ws_tickets: WsTicketTable;
-  matches: MatchTable;
   friendships: FriendshipTable;
+  matches: MatchTable;
   chat_messages: ChatMessageTable;
   tournaments: TournamentTable;
   tournament_entries: TournamentEntryTable;
   tournament_matches: TournamentMatchTable;
   admin_actions: AdminActionTable;
+  ws_tickets: WsTicketTable;
   rating_history: RatingHistoryTable;
 }
 
 export type UserRow = Selectable<UserTable>;
-export type MemoryUserRow = Omit<UserRow, "created_at" | "banned_at">;
-export type MatchRow = Selectable<MatchTable>;
-
-export interface MatchWithHandlesRow extends MatchRow {
-  winner_handle: string | null;
-  loser_handle: string | null;
-}
-
-export interface FriendshipWithUserRow extends UserRow {
-  friendship_id: string;
-  friendship_status: import("@pong-pong/shared").FriendshipStatus;
-}
-
-export type ChatMessageRow = Selectable<ChatMessageTable>;
-export interface ChatMessageWithSenderRow extends ChatMessageRow {
-  user_id: string;
-  email: string | null;
-  handle: string;
-  display_name: string;
-  avatar_key: string;
-  role: import("@pong-pong/shared").UserRole;
-  status: import("@pong-pong/shared").UserStatus;
-  rating: number;
-  wins: number;
-  losses: number;
-  is_npc: boolean;
-}
-
-export type TournamentRow = Selectable<TournamentTable>;
-export type TournamentMatchRow = Selectable<TournamentMatchTable>;
-export interface TournamentWithCreatorRow extends TournamentRow {
-  creator_id: string;
-  email: string | null;
-  handle: string;
-  display_name: string;
-  avatar_key: string;
-  role: import("@pong-pong/shared").UserRole;
-  user_status: import("@pong-pong/shared").UserStatus;
-  rating: number;
-  wins: number;
-  losses: number;
-  is_npc: boolean;
-}
 export type UserProjectionRow = Pick<
   UserRow,
   | "id"
@@ -190,3 +156,46 @@ export type UserProjectionRow = Pick<
   | "losses"
   | "is_npc"
 >;
+export type MatchRow = Selectable<MatchTable>;
+export type ChatMessageRow = Selectable<ChatMessageTable>;
+export type TournamentRow = Selectable<TournamentTable>;
+export type TournamentMatchRow = Selectable<TournamentMatchTable>;
+export type AdminActionRow = Selectable<AdminActionTable>;
+
+export interface MatchWithHandlesRow extends MatchRow {
+  winner_handle: string | null;
+  loser_handle: string | null;
+}
+
+export interface FriendshipWithUserRow extends UserRow {
+  friendship_id: string;
+  friendship_status: FriendshipStatus;
+}
+
+export interface ChatMessageWithSenderRow extends ChatMessageRow {
+  user_id: string;
+  email: string | null;
+  handle: string;
+  display_name: string;
+  avatar_key: string;
+  role: UserRole;
+  status: UserStatus;
+  rating: number;
+  wins: number;
+  losses: number;
+  is_npc: boolean;
+}
+
+export interface TournamentWithCreatorRow extends TournamentRow {
+  creator_id: string;
+  email: string | null;
+  handle: string;
+  display_name: string;
+  avatar_key: string;
+  role: UserRole;
+  user_status: UserStatus;
+  rating: number;
+  wins: number;
+  losses: number;
+  is_npc: boolean;
+}
