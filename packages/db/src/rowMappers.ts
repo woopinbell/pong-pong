@@ -1,5 +1,33 @@
-import type { AdminActionSummary, ChatMessage, FriendSummary, MatchSummary, PublicUser, SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
-import type { AdminActionRow, ChatMessageWithSenderRow, FriendshipWithUserRow, MatchWithHandlesRow, TournamentMatchRow, TournamentWithCreatorRow, UserProjectionRow } from "./schema";
+import type {
+  AdminActionSummary,
+  ChatMessage,
+  FriendSummary,
+  MatchSummary,
+  PublicUser,
+  SessionUser,
+  TournamentMatchSummary,
+  TournamentSummary
+} from "@pong-pong/shared";
+import type {
+  AdminActionRow,
+  ChatMessageWithSenderRow,
+  FriendshipWithUserRow,
+  MatchWithHandlesRow,
+  TournamentMatchRow,
+  TournamentWithCreatorRow,
+  UserProjectionRow
+} from "./schema";
+
+export interface TournamentMatchRecordView {
+  id: string;
+  tournamentId: string;
+  round: TournamentMatchRow["round"];
+  slot: number;
+  status: TournamentMatchRow["status"];
+  leftUserId: string | null;
+  rightUserId: string | null;
+  winnerId: string | null;
+}
 
 export function toPublicUser(row: UserProjectionRow, online = false): PublicUser {
   return {
@@ -36,7 +64,11 @@ export function toMatchSummary(row: MatchWithHandlesRow, userId?: string): Match
 }
 
 export function toFriendSummary(row: FriendshipWithUserRow): FriendSummary {
-  return { id: row.friendship_id, status: row.friendship_status, user: toPublicUser(row, true) };
+  return {
+    id: row.friendship_id,
+    status: row.friendship_status,
+    user: toPublicUser(row, true)
+  };
 }
 
 export function toChatMessage(row: ChatMessageWithSenderRow): ChatMessage {
@@ -102,8 +134,8 @@ export function toTournamentMatchSummary(
     left: users.left,
     right: users.right,
     winner: users.winner,
-    scoreLeft: row.score_left,
-    scoreRight: row.score_right,
+    scoreLeft: row.score_left == null ? null : Number(row.score_left),
+    scoreRight: row.score_right == null ? null : Number(row.score_right),
     roomId: row.room_id,
     matchId: row.match_id
   };
@@ -113,5 +145,12 @@ export function toAdminActionSummary(
   row: AdminActionRow,
   users: { actor: PublicUser | null; target: PublicUser | null }
 ): AdminActionSummary {
-  return { id: row.id, actor: users.actor, target: users.target, action: row.action, reason: row.reason, createdAt: row.created_at.toISOString() };
+  return {
+    id: row.id,
+    actor: users.actor,
+    target: users.target,
+    action: row.action,
+    reason: row.reason,
+    createdAt: row.created_at.toISOString()
+  };
 }
