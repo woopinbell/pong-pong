@@ -344,15 +344,24 @@ class PostgresRepository implements AppRepository {
   }
 
   async listRecentMatches(userId?: string): Promise<MatchSummary[]> {
-    const filter = userId ? sql`where m.winner_id = ${userId} or m.loser_id = ${userId}` : sql``;
-    const result = await sql<MatchWithHandlesRow>`
-      select m.*, winner.handle as winner_handle, loser.handle as loser_handle
-      from matches m
-      left join users winner on winner.id = m.winner_id
-      left join users loser on loser.id = m.loser_id
-      ${filter}
-      order by m.ended_at desc limit 8
-    `.execute(this.db);
+    const result = userId
+      ? await sql<MatchWithHandlesRow>`
+        select m.*, winner.handle as winner_handle, loser.handle as loser_handle
+        from matches m
+        left join users winner on winner.id = m.winner_id
+        left join users loser on loser.id = m.loser_id
+        where m.winner_id = ${userId} or m.loser_id = ${userId}
+        order by m.ended_at desc
+        limit 8
+      `.execute(this.db)
+      : await sql<MatchWithHandlesRow>`
+        select m.*, winner.handle as winner_handle, loser.handle as loser_handle
+        from matches m
+        left join users winner on winner.id = m.winner_id
+        left join users loser on loser.id = m.loser_id
+        order by m.ended_at desc
+        limit 8
+      `.execute(this.db);
     return result.rows.map((row) => toMatchSummary(row, userId));
   }
 
@@ -360,13 +369,19 @@ class PostgresRepository implements AppRepository {
     const user = await this.getUserById(userId);
     if (!user) throw new Error("user not found");
     const recentMatches = await this.listRecentMatches(userId);
-    return { me: { ...user, email: null }, recentMatches, winRate: percentage(user.wins, user.losses), bestStreak: bestWinningStreak(recentMatches) };
+    return {
+      me: { ...user, email: null },
+      recentMatches,
+      winRate: percentage(user.wins, user.losses),
+      bestStreak: bestWinningStreak(recentMatches)
+    };
   }
 
   async listFriends(userId: string): Promise<FriendSummary[]> {
     const result = await sql<FriendshipWithUserRow>`
       select f.id as friendship_id, f.status as friendship_status, u.*
-      from friendships f join users u on u.id = case when f.requester_id = ${userId} then f.addressee_id else f.requester_id end
+      from friendships f
+      join users u on u.id = case when f.requester_id = ${userId} then f.addressee_id else f.requester_id end
       where f.requester_id = ${userId} or f.addressee_id = ${userId}
       order by f.updated_at desc
     `.execute(this.db);
