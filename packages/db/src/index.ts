@@ -74,7 +74,13 @@ export interface CreateWsTicketInput {
 
 export type SeedProfile = "development" | "demo";
 
-type NpcSeed = { handle: string; displayName: string; rating: number; avatarKey: string };
+type NpcSeed = {
+  handle: string;
+  displayName: string;
+  rating: number;
+  avatarKey: string;
+};
+
 const NPC_PLAYERS: NpcSeed[] = [
   { handle: "npc-rally-1100", displayName: "AI 랠리 1100", rating: 1100, avatarKey: "green" },
   { handle: "npc-block-1200", displayName: "AI 블록 1200", rating: 1200, avatarKey: "blue" },
@@ -185,7 +191,9 @@ class PostgresRepository implements AppRepository {
         await this.upsertDevUser(player);
       }
     }
-    for (const npc of NPC_PLAYERS) await this.upsertNpc(npc);
+    for (const npc of NPC_PLAYERS) {
+      await this.upsertNpc(npc);
+    }
     if (profile === "development") {
       await sql`update users set role = 'admin', rating = 1680 where handle = 'admin'`.execute(this.db);
       await sql`update users set rating = 1723, wins = 32, losses = 11 where handle = 'spin-doctor'`.execute(this.db);
@@ -216,8 +224,12 @@ class PostgresRepository implements AppRepository {
     await sql`
       insert into users (email, handle, display_name, avatar_key, role, status, rating, wins, losses, is_npc)
       values (null, ${input.handle}, ${input.displayName}, ${input.avatarKey}, 'user', 'active', ${input.rating}, 0, 0, true)
-      on conflict (handle) do update set display_name = excluded.display_name, avatar_key = excluded.avatar_key,
-        status = 'active', rating = excluded.rating, is_npc = true
+      on conflict (handle) do update set
+        display_name = excluded.display_name,
+        avatar_key = excluded.avatar_key,
+        status = 'active',
+        rating = excluded.rating,
+        is_npc = true
     `.execute(this.db);
   }
 
