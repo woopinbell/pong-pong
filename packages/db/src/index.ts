@@ -446,11 +446,22 @@ class PostgresRepository implements AppRepository {
     return this.db.transaction().execute(async (transaction) => {
       const inserted = await sql<{ id: string }>`
         insert into matches (
-          result_key, mode, winner_id, loser_id, score_left, score_right, rating_delta
+          result_key,
+          mode,
+          winner_id,
+          loser_id,
+          score_left,
+          score_right,
+          rating_delta
         )
         values (
-          ${command.resultKey}, ${command.mode}, ${command.winnerId}, ${command.loserId},
-          ${command.scoreLeft}, ${command.scoreRight}, 16
+          ${command.resultKey},
+          ${command.mode},
+          ${command.winnerId},
+          ${command.loserId},
+          ${command.scoreLeft},
+          ${command.scoreRight},
+          16
         )
         on conflict (result_key) do nothing
         returning id
@@ -458,7 +469,10 @@ class PostgresRepository implements AppRepository {
 
       if (!inserted.rows[0]) {
         const existing = await sql<{ id: string }>`
-          select id from matches where result_key = ${command.resultKey} limit 1
+          select id
+          from matches
+          where result_key = ${command.resultKey}
+          limit 1
         `.execute(transaction);
         return {
           matchId: firstRow(existing).id,
@@ -476,7 +490,10 @@ class PostgresRepository implements AppRepository {
 
       for (const userId of participantIds) {
         const locked = await sql<{ id: string; rating: number }>`
-          select id, rating from users where id = ${userId} for update
+          select id, rating
+          from users
+          where id = ${userId}
+          for update
         `.execute(transaction);
         const user = firstRow(locked);
         ratings.set(user.id, Number(user.rating));
@@ -486,14 +503,23 @@ class PostgresRepository implements AppRepository {
         const ratingBefore = requireRating(ratings, command.winnerId);
         const ratingAfter = ratingBefore + 16;
         await sql`
-          update users set wins = wins + 1, rating = ${ratingAfter}
+          update users
+          set wins = wins + 1, rating = ${ratingAfter}
           where id = ${command.winnerId}
         `.execute(transaction);
         await sql`
           insert into rating_history (
-            match_id, user_id, rating_before, rating_after, delta
-          ) values (
-            ${matchId}, ${command.winnerId}, ${ratingBefore}, ${ratingAfter},
+            match_id,
+            user_id,
+            rating_before,
+            rating_after,
+            delta
+          )
+          values (
+            ${matchId},
+            ${command.winnerId},
+            ${ratingBefore},
+            ${ratingAfter},
             ${ratingAfter - ratingBefore}
           )
         `.execute(transaction);
@@ -503,14 +529,23 @@ class PostgresRepository implements AppRepository {
         const ratingBefore = requireRating(ratings, command.loserId);
         const ratingAfter = Math.max(800, ratingBefore - 12);
         await sql`
-          update users set losses = losses + 1, rating = ${ratingAfter}
+          update users
+          set losses = losses + 1, rating = ${ratingAfter}
           where id = ${command.loserId}
         `.execute(transaction);
         await sql`
           insert into rating_history (
-            match_id, user_id, rating_before, rating_after, delta
-          ) values (
-            ${matchId}, ${command.loserId}, ${ratingBefore}, ${ratingAfter},
+            match_id,
+            user_id,
+            rating_before,
+            rating_after,
+            delta
+          )
+          values (
+            ${matchId},
+            ${command.loserId},
+            ${ratingBefore},
+            ${ratingAfter},
             ${ratingAfter - ratingBefore}
           )
         `.execute(transaction);
