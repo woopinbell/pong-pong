@@ -798,19 +798,36 @@ class PostgresRepository implements AppRepository {
     return found;
   }
 
-  private async ensureFinalMatch(tournamentId: string): Promise<void> {
-    const semis = await sql<{ winner_id: string; slot: number }>`
-      select winner_id, slot from tournament_matches
-      where tournament_id = ${tournamentId} and round = 'semifinal'
-        and status = 'finished' and winner_id is not null
-      order by slot asc
+  async listAdminUsers(): Promise<PublicUser[]> {
+    const result = await sql<UserRow>`select * from users order by created_at desc limit 50`.execute(this.db);
+    return result.rows.map((row) => toPublicUser(row, true));
+  }
+
+  async listAdminActions(): Promise<AdminActionSummary[]> {
+    const result = await sql<AdminActionRow>`
+      select *
+      from admin_actions
+      order by created_at desc
+      limit 30
     `.execute(this.db);
-    if (semis.rows.length < 2) return;
+    return Promise.all(result.rows.map(async (row) => toAdminActionSummary(row, {
+      actor: row.actor_id ? await this.getUserById(row.actor_id) : null,
+      target: row.target_user_id ? await this.getUserById(row.target_user_id) : null
+    })));
+  }
+
+  async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
+    const result = await sql<UserRow>`
+      update users
+      set status = ${banned ? "banned" : "active"}, banned_at = ${banned ? sql`now()` : null}
+      where id = ${targetUserId}
+      returning *
+    `.execute(this.db);
     await sql`
-      insert into tournament_matches (tournament_id, round, slot, left_user_id, right_user_id, status)
-      values (${tournamentId}, 'final', 1, ${semis.rows[0].winner_id}, ${semis.rows[1].winner_id}, 'ready')
-      on conflict (tournament_id, round, slot) do nothing
+      insert into admin_actions (actor_id, target_user_id, action, reason)
+      values (${actorId}, ${targetUserId}, ${banned ? "ban" : "unban"}, ${reason})
     `.execute(this.db);
+    return toPublicUser(firstRow(result));
   }
 
   private async tournamentFromRow(row: TournamentWithCreatorRow): Promise<TournamentSummary> {
@@ -843,25 +860,28 @@ class PostgresRepository implements AppRepository {
     `.execute(executor);
   }
 
-  async listAdminUsers(): Promise<PublicUser[]> {
-    const result = await sql<UserRow>`select * from users order by created_at desc limit 50`.execute(this.db);
-    return result.rows.map((row) => toPublicUser(row, true));
+  private async ensureFinalMatch(tournamentId: string): Promise<void> {
+    const semis = await sql<{ winner_id: string; slot: number }>`
+      select winner_id, slot
+      from tournament_matches
+      where tournament_id = ${tournamentId} and round = 'semifinal' and status = 'finished' and winner_id is not null
+      order by slot asc
+    `.execute(this.db);
+    if (semis.rows.length < 2) return;
+    await sql`
+      insert into tournament_matches (tournament_id, round, slot, left_user_id, right_user_id, status)
+      values (${tournamentId}, 'final', 1, ${semis.rows[0].winner_id}, ${semis.rows[1].winner_id}, 'ready')
+      on conflict (tournament_id, round, slot) do nothing
+    `.execute(this.db);
   }
 
-  async listAdminActions(): Promise<AdminActionSummary[]> {
-    const result = await sql<AdminActionRow>`select * from admin_actions order by created_at desc limit 30`.execute(this.db);
-    return Promise.all(result.rows.map(async (row) => toAdminActionSummary(row, {
-      actor: row.actor_id ? await this.getUserById(row.actor_id) : null,
-      target: row.target_user_id ? await this.getUserById(row.target_user_id) : null
-    })));
+  private async tournamentMatchFromRow(row: TournamentMatchRow): Promise<TournamentMatchSummary> {
+    return toTournamentMatchSummary(row, {
+      left: row.left_user_id ? await this.getUserById(row.left_user_id) : null,
+      right: row.right_user_id ? await this.getUserById(row.right_user_id) : null,
+      winner: row.winner_id ? await this.getUserById(row.winner_id) : null
+    });
   }
-
-  async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
-    const result = await sql<UserRow>`update users set status = ${banned ? "banned" : "active"}, banned_at = ${banned ? sql`now()` : null} where id = ${targetUserId} returning *`.execute(this.db);
-    await sql`insert into admin_actions (actor_id, target_user_id, action, reason) values (${actorId}, ${targetUserId}, ${banned ? "ban" : "unban"}, ${reason})`.execute(this.db);
-    return toPublicUser(firstRow(result));
-  }
-
 }
 
 class MemoryRepository implements AppRepository {
