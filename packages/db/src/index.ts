@@ -831,24 +831,35 @@ class PostgresRepository implements AppRepository {
   }
 
   private async tournamentFromRow(row: TournamentWithCreatorRow): Promise<TournamentSummary> {
-    const entries = await sql<UserRow>`select u.* from tournament_entries e join users u on u.id = e.user_id where e.tournament_id = ${row.id} order by e.seed asc`.execute(this.db);
+    const entries = await sql<UserRow>`
+      select u.*
+      from tournament_entries e
+      join users u on u.id = e.user_id
+      where e.tournament_id = ${row.id}
+      order by e.seed asc
+    `.execute(this.db);
     const matches = await sql<TournamentMatchRow>`
-      select * from tournament_matches where tournament_id = ${row.id}
+      select *
+      from tournament_matches
+      where tournament_id = ${row.id}
       order by case when round = 'semifinal' then 1 else 2 end, slot asc
     `.execute(this.db);
-    const summaries = await Promise.all(matches.rows.map(async (match) => toTournamentMatchSummary(match, {
-      left: match.left_user_id ? await this.getUserById(match.left_user_id) : null,
-      right: match.right_user_id ? await this.getUserById(match.right_user_id) : null,
-      winner: match.winner_id ? await this.getUserById(match.winner_id) : null
-    })));
-    const summary = toTournamentSummary(row, entries.rows.map((entry) => toPublicUser(entry, true)), summaries);
-    summary.winner = row.winner_id ? await this.getUserById(row.winner_id) : null;
-    return summary;
+    return toTournamentSummary(row, {
+      entries: entries.rows.map((entry) => toPublicUser(entry, true)),
+      matches: await Promise.all(matches.rows.map((match) => this.tournamentMatchFromRow(match))),
+      winner: row.winner_id ? await this.getUserById(row.winner_id) : null
+    });
   }
 
-  private async ensureTournamentBracket(tournamentId: string, executor: Kysely<Database> = this.db): Promise<void> {
+  private async ensureTournamentBracket(
+    tournamentId: string,
+    executor: Kysely<Database> | Transaction<Database> = this.db
+  ): Promise<void> {
     const entries = await sql<{ user_id: string; seed: number }>`
-      select user_id, seed from tournament_entries where tournament_id = ${tournamentId} order by seed asc
+      select user_id, seed
+      from tournament_entries
+      where tournament_id = ${tournamentId}
+      order by seed asc
     `.execute(executor);
     if (entries.rows.length < 4) return;
     await sql`

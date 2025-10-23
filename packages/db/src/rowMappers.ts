@@ -94,21 +94,7 @@ export function toChatMessage(row: ChatMessageWithSenderRow): ChatMessage {
   };
 }
 
-export function toTournamentSummary(row: TournamentWithCreatorRow, entries: PublicUser[], matches: TournamentMatchSummary[] = []): TournamentSummary {
-  return {
-    id: row.id,
-    name: row.name,
-    status: row.status,
-    createdBy: toPublicUser({ ...row, id: row.creator_id, status: row.user_status }),
-    playerCount: entries.length,
-    capacity: Number(row.capacity),
-    winner: null,
-    entries,
-    matches
-  };
-}
-
-export function toTournamentMatchRecord(row: TournamentMatchRow) {
+export function toTournamentMatchRecord(row: TournamentMatchRow): TournamentMatchRecordView {
   return {
     id: row.id,
     tournamentId: row.tournament_id,
@@ -138,6 +124,39 @@ export function toTournamentMatchSummary(
     scoreRight: row.score_right == null ? null : Number(row.score_right),
     roomId: row.room_id,
     matchId: row.match_id
+  };
+}
+
+export function toTournamentSummary(
+  row: TournamentWithCreatorRow,
+  related: {
+    entries: PublicUser[];
+    matches: TournamentMatchSummary[];
+    winner: PublicUser | null;
+  }
+): TournamentSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status,
+    createdBy: toPublicUser({
+      id: row.creator_id,
+      email: row.email,
+      handle: row.handle,
+      display_name: row.display_name,
+      avatar_key: row.avatar_key,
+      role: row.role,
+      status: row.user_status,
+      rating: row.rating,
+      wins: row.wins,
+      losses: row.losses,
+      is_npc: row.is_npc
+    }),
+    playerCount: related.entries.length,
+    capacity: Number(row.capacity),
+    winner: related.winner,
+    entries: related.entries,
+    matches: related.matches
   };
 }
 
