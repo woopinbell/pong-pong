@@ -657,29 +657,55 @@ class PostgresRepository implements AppRepository {
   async listLobbyChat(): Promise<ChatMessage[]> {
     const result = await sql<ChatMessageWithSenderRow>`
       select c.*, u.id as user_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status, u.rating, u.wins, u.losses, u.is_npc
-      from chat_messages c join users u on u.id = c.sender_id where c.scope = 'lobby'
-      order by c.created_at desc limit 20
+      from chat_messages c
+      join users u on u.id = c.sender_id
+      where c.scope = 'lobby'
+      order by c.created_at desc
+      limit 20
     `.execute(this.db);
     return result.rows.reverse().map(toChatMessage);
   }
 
   async createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage> {
-    const result = await sql<ChatMessageRow>`insert into chat_messages (scope, room_id, sender_id, body) values (${input.scope}, ${input.roomId ?? null}, ${input.senderId}, ${input.body}) returning *`.execute(this.db);
+    const result = await sql<ChatMessageRow>`
+      insert into chat_messages (scope, room_id, sender_id, body)
+      values (${input.scope}, ${input.roomId ?? null}, ${input.senderId}, ${input.body})
+      returning *
+    `.execute(this.db);
     const user = await this.getUserById(input.senderId);
     if (!user) throw new Error("chat sender not found");
     const row = firstRow(result);
-    return { id: row.id, scope: row.scope, roomId: row.room_id, sender: user, body: row.body, createdAt: new Date(row.created_at).toISOString() };
+    return {
+      id: row.id,
+      scope: row.scope,
+      roomId: row.room_id,
+      sender: user,
+      body: row.body,
+      createdAt: new Date(row.created_at).toISOString()
+    };
   }
 
   async listTournaments(): Promise<TournamentSummary[]> {
-    const result = await sql<TournamentWithCreatorRow>`select t.*, u.id as creator_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status as user_status, u.rating, u.wins, u.losses, u.is_npc from tournaments t join users u on u.id = t.created_by order by t.created_at desc limit 10`.execute(this.db);
+    const result = await sql<TournamentWithCreatorRow>`
+      select t.*, u.id as creator_id, u.email, u.handle, u.display_name, u.avatar_key, u.role, u.status as user_status, u.rating, u.wins, u.losses, u.is_npc
+      from tournaments t
+      join users u on u.id = t.created_by
+      order by t.created_at desc
+      limit 10
+    `.execute(this.db);
     const summaries: TournamentSummary[] = [];
-    for (const row of result.rows) summaries.push(await this.tournamentFromRow(row));
+    for (const row of result.rows) {
+      summaries.push(await this.tournamentFromRow(row));
+    }
     return summaries;
   }
 
   async createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary> {
-    const result = await sql<TournamentRow>`insert into tournaments (name, created_by, capacity) values (${input.name}, ${input.createdBy}, 4) returning *`.execute(this.db);
+    const result = await sql<TournamentRow>`
+      insert into tournaments (name, created_by, capacity)
+      values (${input.name}, ${input.createdBy}, 4)
+      returning *
+    `.execute(this.db);
     await this.joinTournament(firstRow(result).id, input.createdBy);
     const tournaments = await this.listTournaments();
     return tournaments.find((item) => item.id === firstRow(result).id) ?? tournaments[0];
@@ -728,7 +754,8 @@ class PostgresRepository implements AppRepository {
         await this.ensureTournamentBracket(tournamentId, transaction);
       }
     });
-    const found = (await this.listTournaments()).find((item) => item.id === tournamentId);
+    const tournaments = await this.listTournaments();
+    const found = tournaments.find((item) => item.id === tournamentId);
     if (!found) throw new Error("tournament not found");
     return found;
   }
@@ -740,7 +767,8 @@ class PostgresRepository implements AppRepository {
 
   async startTournamentMatch(matchId: string, roomId: string): Promise<void> {
     await sql`
-      update tournament_matches set status = 'running', room_id = ${roomId}, updated_at = now()
+      update tournament_matches
+      set status = 'running', room_id = ${roomId}, updated_at = now()
       where id = ${matchId} and status in ('ready', 'running')
     `.execute(this.db);
   }
@@ -748,14 +776,24 @@ class PostgresRepository implements AppRepository {
   async completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary> {
     const updated = await sql<TournamentMatchRow>`
       update tournament_matches
-      set status = 'finished', room_id = ${input.roomId}, match_id = ${input.matchId},
-          winner_id = ${input.winnerId}, score_left = ${input.scoreLeft}, score_right = ${input.scoreRight}, updated_at = now()
-      where id = ${input.tournamentMatchId} returning *
+      set status = 'finished',
+          room_id = ${input.roomId},
+          match_id = ${input.matchId},
+          winner_id = ${input.winnerId},
+          score_left = ${input.scoreLeft},
+          score_right = ${input.scoreRight},
+          updated_at = now()
+      where id = ${input.tournamentMatchId}
+      returning *
     `.execute(this.db);
     const row = firstRow(updated);
-    if (row.round === "semifinal") await this.ensureFinalMatch(row.tournament_id);
-    else await sql`update tournaments set status = 'finished', winner_id = ${input.winnerId} where id = ${row.tournament_id}`.execute(this.db);
-    const found = (await this.listTournaments()).find((item) => item.id === row.tournament_id);
+    if (row.round === "semifinal") {
+      await this.ensureFinalMatch(row.tournament_id);
+    } else {
+      await sql`update tournaments set status = 'finished', winner_id = ${input.winnerId} where id = ${row.tournament_id}`.execute(this.db);
+    }
+    const tournaments = await this.listTournaments();
+    const found = tournaments.find((item) => item.id === row.tournament_id);
     if (!found) throw new Error("tournament not found");
     return found;
   }
