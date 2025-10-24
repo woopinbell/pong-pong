@@ -900,8 +900,8 @@ class MemoryRepository implements AppRepository {
   private readonly sessions = new Map<string, string>();
   private readonly wsTickets = new Map<string, { userId: string; expiresAt: number }>();
   private readonly matches: MemoryMatchRecord[] = [];
-  private readonly friendships: MemoryFriendship[] = [];
   private readonly chats: ChatMessage[] = [];
+  private readonly friendships: MemoryFriendship[] = [];
   private readonly tournaments: TournamentSummary[] = [];
   private readonly adminActions: AdminActionSummary[] = [];
 
@@ -1036,17 +1036,16 @@ class MemoryRepository implements AppRepository {
   }
 
   async listNpcOpponents(): Promise<PublicUser[]> {
-    return [...this.users.values()].filter((user) => user.is_npc && user.status === "active").sort((a, b) => a.rating - b.rating).map((user) => toPublicUser(user, false));
+    return [...this.users.values()]
+      .filter((user) => user.is_npc && user.status === "active")
+      .sort((a, b) => a.rating - b.rating)
+      .map((user) => toPublicUser(user, false));
   }
 
   async listLeaderboard(): Promise<LeaderboardEntry[]> {
     return [...this.users.values()]
       .sort((a, b) => b.rating - a.rating || b.wins - a.wins)
-      .map((user, index) => ({
-        rank: index + 1,
-        user: toPublicUser(user, false),
-        winRate: percentage(user.wins, user.losses)
-      }));
+      .map((user, index) => ({ rank: index + 1, user: toPublicUser(user, false), winRate: percentage(user.wins, user.losses) }));
   }
 
   async listRecentMatches(userId?: string): Promise<MatchSummary[]> {
@@ -1061,7 +1060,12 @@ class MemoryRepository implements AppRepository {
     const user = await this.getUserById(userId);
     if (!user) throw new Error("user not found");
     const recentMatches = await this.listRecentMatches(userId);
-    return { me: { ...user, email: null }, recentMatches, winRate: percentage(user.wins, user.losses), bestStreak: bestWinningStreak(recentMatches) };
+    return {
+      me: { ...user, email: null },
+      recentMatches,
+      winRate: percentage(user.wins, user.losses),
+      bestStreak: bestWinningStreak(recentMatches)
+    };
   }
 
   async listFriends(userId: string): Promise<FriendSummary[]> {
