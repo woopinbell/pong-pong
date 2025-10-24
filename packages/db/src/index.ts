@@ -1263,21 +1263,47 @@ class MemoryRepository implements AppRepository {
   }
 
   async completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary> {
-    const tournament = this.tournaments.find((item) => item.matches.some((match) => match.id === input.tournamentMatchId));
-    if (!tournament) throw new Error("tournament match not found");
-    const match = tournament.matches.find((item) => item.id === input.tournamentMatchId)!;
-    match.status = "finished";
-    match.roomId = input.roomId;
-    match.matchId = input.matchId;
-    match.winner = input.winnerId ? await this.getUserById(input.winnerId) : null;
-    match.scoreLeft = input.scoreLeft;
-    match.scoreRight = input.scoreRight;
-    if (match.round === "semifinal") this.ensureMemoryFinal(tournament);
-    else {
-      tournament.status = "finished";
-      tournament.winner = match.winner;
+    const found = this.findTournamentMatch(input.tournamentMatchId);
+    if (!found) throw new Error("tournament match not found");
+    const winner = input.winnerId ? await this.getUserById(input.winnerId) : null;
+    found.match.status = "finished";
+    found.match.roomId = input.roomId;
+    found.match.matchId = input.matchId;
+    found.match.winner = winner;
+    found.match.scoreLeft = input.scoreLeft;
+    found.match.scoreRight = input.scoreRight;
+    if (found.match.round === "semifinal") {
+      this.ensureMemoryFinal(found.tournament);
+    } else {
+      found.tournament.status = "finished";
+      found.tournament.winner = winner;
     }
-    return tournament;
+    return found.tournament;
+  }
+
+  async listAdminUsers(): Promise<PublicUser[]> {
+    return this.listOnlineUsers();
+  }
+
+  async listAdminActions(): Promise<AdminActionSummary[]> {
+    return this.adminActions;
+  }
+
+  async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
+    const user = this.users.get(targetUserId);
+    if (!user) throw new Error("user not found");
+    user.status = banned ? "banned" : "active";
+    const actor = await this.getUserById(actorId);
+    const target = toPublicUser(user, true);
+    this.adminActions.unshift({
+      id: randomUUID(),
+      actor,
+      target,
+      action: banned ? "ban" : "unban",
+      reason,
+      createdAt: new Date().toISOString()
+    });
+    return target;
   }
 
   private ensureMemoryBracket(tournament: TournamentSummary): void {
@@ -1295,19 +1321,13 @@ class MemoryRepository implements AppRepository {
     tournament.matches.push(memoryTournamentMatch(tournament.id, "final", 1, semis[0].winner, semis[1].winner));
   }
 
-  async listAdminUsers(): Promise<PublicUser[]> { return this.listOnlineUsers(); }
-
-  async listAdminActions(): Promise<AdminActionSummary[]> { return this.adminActions; }
-
-  async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
-    const user = this.users.get(targetUserId);
-    if (!user) throw new Error("user not found");
-    user.status = banned ? "banned" : "active";
-    const target = toPublicUser(user, true);
-    this.adminActions.unshift({ id: randomUUID(), actor: await this.getUserById(actorId), target, action: banned ? "ban" : "unban", reason, createdAt: new Date().toISOString() });
-    return target;
+  private findTournamentMatch(matchId: string): { tournament: TournamentSummary; match: TournamentMatchSummary } | null {
+    for (const tournament of this.tournaments) {
+      const match = tournament.matches.find((item) => item.id === matchId);
+      if (match) return { tournament, match };
+    }
+    return null;
   }
-
 }
 
 function firstRow<T>(result: { rows: T[] }): T {
