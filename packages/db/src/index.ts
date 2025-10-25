@@ -1209,22 +1209,43 @@ class MemoryRepository implements AppRepository {
     };
   }
 
-  async listLobbyChat(): Promise<ChatMessage[]> { return this.chats.filter((chat) => chat.scope === "lobby").slice(-20); }
+  async listLobbyChat(): Promise<ChatMessage[]> {
+    return this.chats.filter((chat) => chat.scope === "lobby").slice(-20);
+  }
 
   async createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage> {
     const sender = await this.getUserById(input.senderId);
     if (!sender) throw new Error("chat sender not found");
-    const message = { id: randomUUID(), scope: input.scope, roomId: input.roomId ?? null, sender, body: input.body, createdAt: new Date().toISOString() };
+    const message: ChatMessage = {
+      id: randomUUID(),
+      scope: input.scope,
+      roomId: input.roomId ?? null,
+      sender,
+      body: input.body,
+      createdAt: new Date().toISOString()
+    };
     this.chats.push(message);
     return message;
   }
 
-  async listTournaments(): Promise<TournamentSummary[]> { return this.tournaments; }
+  async listTournaments(): Promise<TournamentSummary[]> {
+    return this.tournaments;
+  }
 
   async createTournament(input: { name: string; createdBy: string }): Promise<TournamentSummary> {
     const creator = await this.getUserById(input.createdBy);
     if (!creator) throw new Error("creator not found");
-    const tournament = { id: randomUUID(), name: input.name, status: "open" as const, createdBy: creator, playerCount: 1, capacity: 4, winner: null, entries: [creator], matches: [] as TournamentMatchSummary[] };
+    const tournament: TournamentSummary = {
+      id: randomUUID(),
+      name: input.name,
+      status: "open",
+      createdBy: creator,
+      playerCount: 1,
+      capacity: 4,
+      winner: null,
+      entries: [creator],
+      matches: []
+    };
     this.tournaments.unshift(tournament);
     return tournament;
   }
@@ -1234,9 +1255,13 @@ class MemoryRepository implements AppRepository {
     const rawUser = this.users.get(userId);
     if (!tournament || !rawUser) throw new Error("tournament not found");
     const user = toPublicUser(rawUser, true);
-    const joined = tournament.entries.some((entry) => entry.id === user.id);
-    if (!joined && tournament.entries.length >= tournament.capacity) throw new Error("tournament full");
-    if (!joined) tournament.entries.push(user);
+    const alreadyJoined = tournament.entries.some((entry) => entry.id === user.id);
+    if (!alreadyJoined && tournament.entries.length >= tournament.capacity) {
+      throw new Error("tournament full");
+    }
+    if (!alreadyJoined) {
+      tournament.entries.push(user);
+    }
     tournament.playerCount = tournament.entries.length;
     tournament.status = tournament.playerCount >= tournament.capacity ? "running" : "open";
     this.ensureMemoryBracket(tournament);
@@ -1244,18 +1269,25 @@ class MemoryRepository implements AppRepository {
   }
 
   async getTournamentMatch(matchId: string): Promise<TournamentMatchRecord | null> {
-    for (const tournament of this.tournaments) {
-      const match = tournament.matches.find((item) => item.id === matchId);
-      if (match) return { id: match.id, tournamentId: match.tournamentId, round: match.round, slot: match.slot, status: match.status, leftUserId: match.left?.id ?? null, rightUserId: match.right?.id ?? null, winnerId: match.winner?.id ?? null };
-    }
-    return null;
+    const match = this.findTournamentMatch(matchId)?.match;
+    if (!match) return null;
+    return {
+      id: match.id,
+      tournamentId: match.tournamentId,
+      round: match.round,
+      slot: match.slot,
+      status: match.status,
+      leftUserId: match.left?.id ?? null,
+      rightUserId: match.right?.id ?? null,
+      winnerId: match.winner?.id ?? null
+    };
   }
 
   async startTournamentMatch(matchId: string, roomId: string): Promise<void> {
-    const match = this.tournaments.flatMap((item) => item.matches).find((item) => item.id === matchId);
-    if (!match) throw new Error("tournament match not found");
-    match.status = "running";
-    match.roomId = roomId;
+    const found = this.findTournamentMatch(matchId);
+    if (!found) throw new Error("tournament match not found");
+    found.match.status = "running";
+    found.match.roomId = roomId;
   }
 
   async completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary> {
