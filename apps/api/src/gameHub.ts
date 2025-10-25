@@ -11,7 +11,8 @@ import {
   type PlayerSide,
   type PublicUser,
   type ServerEvent,
-  type SessionUser
+  type SessionUser,
+  WINNING_SCORE
 } from "@pong-pong/shared";
 import { DEFAULT_TIMESTEP_MS, FixedStepScheduler } from "./game/fixedStepScheduler";
 import { ConnectionHeartbeat } from "./game/heartbeat";
@@ -19,6 +20,7 @@ import { InputGate } from "./game/inputGate";
 import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestSnapshotBuffer";
 import { PongAi } from "./game/pongAi";
 import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
+import { RoomSession } from "./game/roomSession";
 
 type Client = {
   id: string;
@@ -54,6 +56,9 @@ type Room = {
   simulation: PongSimulationState;
   aiController: PongAi | null;
   finishing: Promise<void> | null;
+  session: RoomSession;
+  reconnectTimer: NodeJS.Timeout | null;
+  disconnectedUsers: Partial<Record<PlayerSide, string>>;
 };
 
 const NPC_QUEUE_FALLBACK_MS = 6000;
@@ -306,6 +311,8 @@ export class GameHub {
     const npcUser = options.npc ?? null;
     const rightPlayer = right?.user ?? npcUser;
     const simulation = PongSimulation.initialState();
+    const session = new RoomSession();
+    if (options.ai) session.markReady("right");
     const room: Room = {
       id: roomId,
       clients: { left, ...(right ? { right } : {}) },
@@ -318,6 +325,9 @@ export class GameHub {
       simulation,
       aiController: options.ai ? new PongAi(roomId, npcUser?.rating ?? 1200) : null,
       finishing: null,
+      session,
+      reconnectTimer: null,
+      disconnectedUsers: {},
       snapshot: {
         roomId,
         tick: 0,
@@ -369,8 +379,9 @@ export class GameHub {
       if (player.side === side) player.ready = true;
     }
     if (room.ai) room.ready.right = true;
-    if (room.ready.left && room.ready.right && room.snapshot.state.phase === "waiting") {
-      room.snapshot.state.phase = "playing";
+    const sessionState = room.session.markReady(side);
+    if (room.ready.left && room.ready.right && sessionState === "playing") {
+      room.snapshot.state.phase = sessionState;
       this.startRoomScheduler(room);
     }
     this.broadcastSnapshot(room);
@@ -403,14 +414,18 @@ export class GameHub {
     const room = this.rooms.get(roomId);
     if (!room || room.snapshot.state.phase !== "playing" || !sideFor(room, client)) return;
     room.scheduler?.stop();
-    room.snapshot.state.phase = "paused";
+    const sessionState = room.session.pause();
+    if (sessionState !== "paused") return;
+    room.snapshot.state.phase = sessionState;
     this.broadcastSnapshot(room);
   }
 
   private resumeRoom(client: Client, roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room || room.snapshot.state.phase !== "paused" || !sideFor(room, client)) return;
-    room.snapshot.state.phase = "playing";
+    const sessionState = room.session.resume();
+    if (sessionState !== "playing") return;
+    room.snapshot.state.phase = sessionState;
     this.startRoomScheduler(room);
     this.broadcastSnapshot(room);
   }
