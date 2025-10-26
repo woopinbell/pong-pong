@@ -63,9 +63,12 @@ type Room = {
 
 const NPC_QUEUE_FALLBACK_MS = 6000;
 const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
+const CONNECTION_REPLACED_CLOSE_CODE = 4001;
+const CONNECTION_REPLACED_REASON = "connection replaced";
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
+  private readonly clientsByUser = new Map<string, Client>();
   private readonly queue: QueueEntry[] = [];
   private readonly rooms = new Map<string, Room>();
   private readonly tournamentWaiters = new Map<string, Client[]>();
@@ -89,11 +92,16 @@ export class GameHub {
       heartbeat,
       snapshots: new LatestSnapshotBuffer(socket)
     };
+    const previous = this.clientsByUser.get(user.id);
     this.clients.set(client.id, client);
+    this.clientsByUser.set(user.id, client);
     socket.on("message", (payload) => this.receive(client, payload.toString()));
     socket.on("pong", () => heartbeat.acknowledge());
     socket.on("close", () => this.disconnect(client));
-    heartbeat.start();
+    if (previous) this.replaceConnection(previous, client);
+    if (this.clients.get(client.id) === client && socket.readyState === WebSocket.OPEN) {
+      heartbeat.start();
+    }
     this.broadcastPresence();
     for (const payload of pendingPayloads) {
       this.receive(client, payload).catch(() => undefined);
@@ -101,6 +109,7 @@ export class GameHub {
   }
 
   private async receive(client: Client, payload: string): Promise<void> {
+    if (this.clients.get(client.id) !== client) return;
     try {
       const event = parseClientEvent(payload);
       if (event.type === "queue.join") await this.joinQueue(client, event.mode);
@@ -139,9 +148,10 @@ export class GameHub {
     this.leaveQueue(client);
     this.leaveTournamentWaiters(client);
     this.clients.delete(client.id);
-    if (![...this.clients.values()].some((candidate) => candidate.user.id === client.user.id)) {
-      this.inputGate.releaseUser(client.user.id);
+    if (this.clientsByUser.get(client.user.id)?.id === client.id) {
+      this.clientsByUser.delete(client.user.id);
     }
+    this.inputGate.releaseUser(client.user.id);
     if (client.roomId) {
       const room = this.rooms.get(client.roomId);
       if (room) {
@@ -149,6 +159,38 @@ export class GameHub {
       }
     }
     this.broadcastPresence();
+  }
+
+  private replaceConnection(previous: Client, replacement: Client): void {
+    previous.heartbeat.stop();
+    previous.snapshots.close();
+    this.leaveQueue(previous);
+    this.leaveTournamentWaiters(previous);
+    this.clients.delete(previous.id);
+    this.inputGate.releaseUser(previous.user.id);
+
+    if (previous.roomId) {
+      const room = this.rooms.get(previous.roomId);
+      const side = room ? sideFor(room, previous) : null;
+      if (room && side) {
+        room.clients[side] = replacement;
+        replacement.roomId = room.id;
+        previous.roomId = null;
+        this.sendMatchContext(replacement, room, side);
+        this.send(replacement, { type: "game.snapshot", snapshot: room.snapshot });
+      }
+    }
+
+    if (previous.socket.readyState === WebSocket.OPEN) {
+      previous.socket.close(CONNECTION_REPLACED_CLOSE_CODE, CONNECTION_REPLACED_REASON);
+    }
+  }
+
+  private sendMatchContext(client: Client, room: Room, side: PlayerSide): void {
+    const opponent = side === "left"
+      ? room.clients.right?.user.displayName ?? room.npcUser?.displayName ?? "연습 AI"
+      : room.clients.left?.user.displayName ?? "상대 선수";
+    this.send(client, { type: "queue.matched", roomId: room.id, side, opponent });
   }
 
   private async joinQueue(client: Client, mode: "queue" | "ai"): Promise<void> {
