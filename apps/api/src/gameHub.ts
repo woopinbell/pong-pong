@@ -99,6 +99,7 @@ export class GameHub {
     socket.on("pong", () => heartbeat.acknowledge());
     socket.on("close", () => this.disconnect(client));
     if (previous) this.replaceConnection(previous, client);
+    else this.recoverConnection(client);
     if (this.clients.get(client.id) === client && socket.readyState === WebSocket.OPEN) {
       heartbeat.start();
     }
@@ -184,6 +185,39 @@ export class GameHub {
     if (previous.socket.readyState === WebSocket.OPEN) {
       previous.socket.close(CONNECTION_REPLACED_CLOSE_CODE, CONNECTION_REPLACED_REASON);
     }
+  }
+
+  private recoverConnection(client: Client): boolean {
+    const nowMs = Date.now();
+    for (const room of this.rooms.values()) {
+      for (const side of ["left", "right"] as const) {
+        if (room.disconnectedUsers[side] !== client.user.id) continue;
+        if (!room.session.reconnect(side, nowMs)) continue;
+
+        const disconnected = room.clients[side];
+        if (disconnected) disconnected.roomId = null;
+        room.clients[side] = client;
+        client.roomId = room.id;
+        delete room.disconnectedUsers[side];
+        this.sendMatchContext(client, room, side);
+
+        if (room.session.state === "reconnecting") {
+          this.send(client, { type: "game.snapshot", snapshot: room.snapshot });
+        } else {
+          this.clearReconnectTimer(room);
+          room.snapshot.state.phase = room.session.state;
+          if (room.session.state === "playing") this.startRoomScheduler(room);
+          this.broadcastSnapshot(room);
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private clearReconnectTimer(room: Room): void {
+    if (room.reconnectTimer) clearTimeout(room.reconnectTimer);
+    room.reconnectTimer = null;
   }
 
   private sendMatchContext(client: Client, room: Room, side: PlayerSide): void {
