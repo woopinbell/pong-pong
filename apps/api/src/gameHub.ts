@@ -155,9 +155,8 @@ export class GameHub {
     this.inputGate.releaseUser(client.user.id);
     if (client.roomId) {
       const room = this.rooms.get(client.roomId);
-      if (room) {
-        this.finishRoom(room, client === room.clients.left ? "right" : "left").catch(() => undefined);
-      }
+      const side = room ? sideFor(room, client) : null;
+      if (room && side) this.reserveRoomSide(room, side, client.user.id);
     }
     this.broadcastPresence();
   }
@@ -215,6 +214,57 @@ export class GameHub {
     return false;
   }
 
+  private reserveRoomSide(room: Room, side: PlayerSide, userId: string): void {
+    if (room.finishing || room.session.state === "finished") return;
+    room.session.disconnect(side, Date.now());
+    room.disconnectedUsers[side] = userId;
+    room.scheduler?.stop();
+    room.snapshot.state.paddles[side].dy = 0;
+    room.snapshot.state.phase = "paused";
+    this.armReconnectTimer(room);
+    this.broadcastSnapshot(room);
+  }
+
+  private armReconnectTimer(room: Room): void {
+    this.clearReconnectTimer(room);
+    const deadline = room.session.reconnectDeadline;
+    if (deadline === null) return;
+    room.reconnectTimer = setTimeout(() => this.expireReconnect(room.id), Math.max(0, deadline - Date.now()));
+  }
+
+  private expireReconnect(roomId: string): void {
+    const room = this.rooms.get(roomId);
+    if (!room || room.finishing) return;
+    room.reconnectTimer = null;
+    const expiry = room.session.expireReconnect(Date.now());
+    if (!expiry) {
+      this.armReconnectTimer(room);
+      return;
+    }
+
+    room.disconnectedUsers = {};
+    if (!expiry.winnerSide) {
+      this.abandonRoom(room);
+      return;
+    }
+    if (expiry.winnerSide === "left") {
+      room.snapshot.state.leftScore = Math.max(room.snapshot.state.leftScore, WINNING_SCORE);
+    } else {
+      room.snapshot.state.rightScore = Math.max(room.snapshot.state.rightScore, WINNING_SCORE);
+    }
+    this.finishRoom(room, expiry.winnerSide).catch(() => undefined);
+  }
+
+  private abandonRoom(room: Room): void {
+    room.scheduler?.stop();
+    this.clearReconnectTimer(room);
+    for (const client of Object.values(room.clients)) {
+      if (client) client.roomId = null;
+    }
+    this.rooms.delete(room.id);
+    this.broadcastPresence();
+  }
+
   private clearReconnectTimer(room: Room): void {
     if (room.reconnectTimer) clearTimeout(room.reconnectTimer);
     room.reconnectTimer = null;
@@ -228,6 +278,10 @@ export class GameHub {
   }
 
   private async joinQueue(client: Client, mode: "queue" | "ai"): Promise<void> {
+    if (client.roomId) {
+      this.send(client, { type: "error", code: "forbidden", message: "이미 진행 중인 경기가 있습니다." });
+      return;
+    }
     this.leaveQueue(client);
     this.pruneQueue();
     if (mode === "ai") {
@@ -544,6 +598,9 @@ export class GameHub {
 
   private async finalizeRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
     room.scheduler?.stop();
+    this.clearReconnectTimer(room);
+    room.disconnectedUsers = {};
+    room.session.finish();
     room.snapshot.state.phase = "finished";
     const leftUser = room.clients.left?.user ?? null;
     const rightUser = room.clients.right?.user ?? room.npcUser ?? null;
