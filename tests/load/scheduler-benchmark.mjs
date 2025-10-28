@@ -7,6 +7,55 @@ const REPEATS = Number(process.env.BENCHMARK_REPEATS ?? 3);
 const DURATION_MS = Number(process.env.BENCHMARK_DURATION_MS ?? 1_500);
 const WARMUP_MS = 250;
 
+const measurements = [];
+for (const roomCount of ROOM_COUNTS) {
+  for (const strategy of ["room", "shared"]) {
+    const runs = [];
+    for (let repeat = 0; repeat < REPEATS; repeat += 1) {
+      runs.push(await measure(strategy, roomCount));
+    }
+    measurements.push({
+      strategy,
+      roomCount,
+      sampleCount: runs.reduce((sum, run) => sum + run.sampleCount, 0),
+      p95LagMs: round(median(runs.map((run) => run.p95LagMs))),
+      p99LagMs: round(median(runs.map((run) => run.p99LagMs)))
+    });
+  }
+}
+
+const room50 = measurements.find((item) => item.strategy === "room" && item.roomCount === 50);
+const shared50 = measurements.find((item) => item.strategy === "shared" && item.roomCount === 50);
+if (!room50 || !shared50) throw new Error("50-room comparison is missing");
+const thresholdMs = room50.p95LagMs * 1.05;
+const selectedStrategy = shared50.p95LagMs <= thresholdMs ? "shared" : "room";
+
+console.log(JSON.stringify({
+  recordedAt: new Date().toISOString(),
+  runtime: {
+    node: process.version,
+    platform: `${platform()} ${release()}`,
+    cpu: cpus()[0]?.model ?? "unknown",
+    cpuCount: cpus().length,
+    totalMemoryBytes: totalmem(),
+    freeMemoryBytesAtStart: freemem()
+  },
+  settings: {
+    timestepMs: TIMESTEP_MS,
+    durationMs: DURATION_MS,
+    warmupMs: WARMUP_MS,
+    repeats: REPEATS,
+    roomCounts: ROOM_COUNTS
+  },
+  measurements,
+  decision: {
+    selectedStrategy,
+    room50P95LagMs: room50.p95LagMs,
+    shared50P95LagMs: shared50.p95LagMs,
+    maximumSharedP95LagMs: round(thresholdMs)
+  }
+}, null, 2));
+
 async function measure(strategy, roomCount) {
   const samples = [];
   const startedAt = performance.now();
