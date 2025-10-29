@@ -1,22 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { LeaderboardEntry } from "@pong-pong/shared";
+import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
-import { getLeaderboard } from "@/lib/api";
+import { leaderboardQueryOptions } from "@/lib/query";
 
 export default function LeaderboardPage() {
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [message, setMessage] = useState("순위표를 불러오는 중입니다.");
-
-  useEffect(() => {
-    getLeaderboard()
-      .then((items) => {
-        setEntries(items);
-        setMessage("");
-      })
-      .catch(() => setMessage("순위표를 불러오지 못했습니다."));
-  }, []);
+  const leaderboardQuery = useQuery(leaderboardQueryOptions());
+  const entries = leaderboardQuery.data ?? [];
+  const message = leaderboardQuery.isError
+    ? "순위표를 불러오지 못했습니다."
+    : leaderboardQuery.isPending
+      ? "순위표를 불러오는 중입니다."
+      : "";
 
   return (
     <AppShell>

@@ -1,30 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Flame, Target, Trophy, X } from "lucide-react";
-import type { DashboardSummary, MatchSummary } from "@pong-pong/shared";
+import type { MatchSummary } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
-import { getDashboard } from "@/lib/api";
+import { dashboardQueryOptions } from "@/lib/query";
 
 export default function DashboardPage() {
-  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
-  const [message, setMessage] = useState("대시보드를 불러오는 중입니다.");
-
-  useEffect(() => {
-    getDashboard()
-      .then((summary) => {
-        setDashboard(summary);
-        setMessage("");
-      })
-      .catch(() => setMessage("대시보드를 불러오려면 로그인 상태와 서버 연결을 확인해야 합니다."));
-  }, []);
+  const dashboardQuery = useQuery(dashboardQueryOptions());
+  const dashboard = dashboardQuery.data;
 
   if (!dashboard) {
     return (
       <AppShell>
         <h1 className="text-3xl font-black text-ink">내 대시보드</h1>
-        <p className="mt-4 rounded-lg border border-line bg-white p-4 text-sm font-bold text-muted">{message}</p>
+        <p className="mt-4 rounded-lg border border-line bg-white p-4 text-sm font-bold text-muted">
+          {dashboardQuery.isError ? "대시보드를 불러오려면 로그인 상태와 서버 연결을 확인해야 합니다." : "대시보드를 불러오는 중입니다."}
+        </p>
       </AppShell>
     );
   }
