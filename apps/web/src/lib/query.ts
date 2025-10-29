@@ -35,6 +35,54 @@ export const mutationInvalidations = {
   adminStatus: () => [queryKeys.adminUsers(), queryKeys.adminActions()] as const
 };
 
+export const meQueryOptions = () => queryOptions({
+  queryKey: queryKeys.me(),
+  queryFn: ({ signal }) => getMe(signal),
+  staleTime: 30_000
+});
+
+export const lobbyQueryOptions = () => queryOptions({
+  queryKey: queryKeys.lobby(),
+  queryFn: ({ signal }) => getLobby(signal),
+  staleTime: 5_000
+});
+
+export const dashboardQueryOptions = () => queryOptions({
+  queryKey: queryKeys.dashboard(),
+  queryFn: ({ signal }) => getDashboard(signal),
+  staleTime: 10_000
+});
+
+export const profileQueryOptions = (handle: string) => queryOptions({
+  queryKey: queryKeys.profile(handle),
+  queryFn: ({ signal }) => getProfile(handle, signal),
+  staleTime: 30_000
+});
+
+export const leaderboardQueryOptions = () => queryOptions({
+  queryKey: queryKeys.leaderboard(),
+  queryFn: ({ signal }) => getLeaderboard(signal),
+  staleTime: 15_000
+});
+
+export const tournamentsQueryOptions = () => queryOptions({
+  queryKey: queryKeys.tournaments(),
+  queryFn: ({ signal }) => getTournaments(signal),
+  staleTime: 10_000
+});
+
+export const adminUsersQueryOptions = () => queryOptions({
+  queryKey: queryKeys.adminUsers(),
+  queryFn: ({ signal }) => getAdminUsers(signal),
+  staleTime: 5_000
+});
+
+export const adminActionsQueryOptions = () => queryOptions({
+  queryKey: queryKeys.adminActions(),
+  queryFn: ({ signal }) => getAdminActions(signal),
+  staleTime: 5_000
+});
+
 export async function invalidateExactQueries(
   client: QueryClient,
   keys: readonly QueryKey[]
@@ -45,4 +93,23 @@ export async function invalidateExactQueries(
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
   if (error instanceof ApiError && error.status === 401) return false;
   return failureCount < 1;
+}
+
+export function expireSession(client: QueryClient): void {
+  const sessionScopedKeys = [
+    queryKeys.lobby(),
+    queryKeys.dashboard(),
+    queryKeys.friends(),
+    queryKeys.adminUsers(),
+    queryKeys.adminActions()
+  ] as const;
+
+  for (const queryKey of sessionScopedKeys) {
+    if (client.getQueryState(queryKey)?.fetchStatus === "fetching") {
+      setTimeout(() => client.removeQueries({ queryKey, exact: true }), 0);
+    } else {
+      client.removeQueries({ queryKey, exact: true });
+    }
+  }
+  client.setQueryData(queryKeys.me(), null);
 }
