@@ -1,39 +1,47 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Clock, MessageCircle, Trophy, Users, Zap } from "lucide-react";
-import { parseServerEvent, type ChatMessage, type LobbyStats, type PublicUser, type SessionUser } from "@pong-pong/shared";
+import { parseServerEvent, type LobbyResponse } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
 import { StatCard } from "@/components/StatCard";
-import { getLobby, getMe, requestWsTicket, sendLobbyChat } from "@/lib/api";
+import { requestWsTicket, sendLobbyChat } from "@/lib/api";
+import {
+  invalidateExactQueries,
+  lobbyQueryOptions,
+  meQueryOptions,
+  mutationInvalidations,
+  queryKeys
+} from "@/lib/query";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export default function HomePage() {
-  const [me, setMe] = useState<SessionUser | null>(null);
-  const [players, setPlayers] = useState<PublicUser[]>([]);
-  const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [stats, setStats] = useState<LobbyStats | null>(null);
+  const queryClient = useQueryClient();
+  const meQuery = useQuery(meQueryOptions());
+  const lobbyQuery = useQuery(lobbyQueryOptions());
+  const lobby = lobbyQuery.data;
+  const me = lobby?.me ?? meQuery.data ?? null;
+  const players = lobby?.onlinePlayers ?? [];
+  const chat = lobby?.chat ?? [];
+  const stats = lobby?.stats ?? null;
   const [chatInput, setChatInput] = useState("");
   const [notice, setNotice] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
   const userId = me?.id;
-
-  const loadLobby = useCallback(async () => {
-    const lobby = await getLobby();
-    setPlayers(lobby.onlinePlayers);
-    setChat(lobby.chat);
-    setStats(lobby.stats);
-    if (lobby.me) setMe(lobby.me);
-    setNotice("");
-  }, []);
-
-  useEffect(() => {
-    getMe().then(setMe);
-    loadLobby().catch(() => setNotice("서버 로비 정보를 불러오지 못했습니다."));
-  }, [loadLobby]);
+  const chatMutation = useMutation({
+    mutationFn: (body: string) => sendLobbyChat(body),
+    onSuccess: async (message) => {
+      queryClient.setQueryData<LobbyResponse>(queryKeys.lobby(), (current) => current ? {
+        ...current,
+        chat: [...current.chat.filter((item) => item.id !== message.id).slice(-19), message]
+      } : current);
+      await invalidateExactQueries(queryClient, mutationInvalidations.lobbyChat());
+    }
+  });
 
   useEffect(() => {
     if (!userId) return;
@@ -49,10 +57,14 @@ export default function HomePage() {
         socket.onmessage = (event) => {
           const message = parseServerEvent(event.data);
           if (message.type === "chat.message" && message.message.scope === "lobby") {
-            setChat((current) => [...current.filter((item) => item.id !== message.message.id).slice(-19), message.message]);
+            queryClient.setQueryData<LobbyResponse>(queryKeys.lobby(), (current) => current ? {
+              ...current,
+              chat: [...current.chat.filter((item) => item.id !== message.message.id).slice(-19), message.message]
+            } : current);
           }
           if (message.type === "presence.changed") {
-            loadLobby().catch(() => setNotice("로비 지표를 갱신하지 못했습니다."));
+            invalidateExactQueries(queryClient, [queryKeys.lobby()])
+              .catch(() => setNotice("로비 지표를 갱신하지 못했습니다."));
           }
           if (message.type === "error") setNotice(message.message);
         };
@@ -73,7 +85,7 @@ export default function HomePage() {
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [loadLobby, userId]);
+  }, [queryClient, userId]);
 
   async function submitLobbyChat(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,8 +96,7 @@ export default function HomePage() {
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ v: 1, type: "chat.send", scope: "lobby", roomId: null, body }));
       } else {
-        const message = await sendLobbyChat(body);
-        setChat((current) => [...current.slice(-19), message]);
+        await chatMutation.mutateAsync(body);
       }
       setChatInput("");
       setNotice("");
@@ -98,7 +109,7 @@ export default function HomePage() {
     return (
       <div className="min-h-screen bg-slate-50 p-4">
         <div className="mx-auto grid min-h-[calc(100vh-32px)] max-w-6xl items-center gap-6 lg:grid-cols-[420px_1fr]">
-          <LoginPanel onLogin={setMe} />
+          <LoginPanel />
           <section className="card hidden p-6 lg:block">
             <PongCanvas />
             <div className="mt-5 grid grid-cols-3 gap-3 text-center text-sm font-bold text-muted">
@@ -158,7 +169,7 @@ export default function HomePage() {
           <h2 className="flex items-center gap-2 text-lg font-black text-ink">
             <MessageCircle size={20} /> 로비 채팅
           </h2>
-          {notice ? <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{notice}</p> : null}
+          {notice || lobbyQuery.isError ? <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700">{notice || "서버 로비 정보를 불러오지 못했습니다."}</p> : null}
           <div className="mt-4 grid gap-3">
             {chat.length === 0 ? <div className="rounded-lg border border-dashed border-line p-3 text-sm font-semibold text-muted">아직 로비 채팅이 없습니다.</div> : null}
             {chat.map((message) => (
