@@ -1,51 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { use, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Share2, Target, Trophy, UserPlus, X } from "lucide-react";
-import type { MatchSummary, PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
 import { StatCard } from "@/components/StatCard";
-import { getProfile, requestFriend } from "@/lib/api";
+import { requestFriend } from "@/lib/api";
+import {
+  invalidateExactQueries,
+  mutationInvalidations,
+  profileQueryOptions
+} from "@/lib/query";
 
 export default function ProfilePage({ params }: { params: Promise<{ handle: string }> }) {
-  const [handle, setHandle] = useState("pongmaster42");
-  const [user, setUser] = useState<PublicUser | null>(null);
-  const [recentMatches, setRecentMatches] = useState<MatchSummary[]>([]);
-  const [message, setMessage] = useState("프로필 정보를 불러오는 중입니다.");
-
-  useEffect(() => {
-    params.then(({ handle: resolved }) => {
-      setHandle(resolved);
-      getProfile(resolved)
-        .then((profile) => {
-          setUser(profile.user);
-          setRecentMatches(profile.recentMatches);
-          setMessage("공개 프로필 정보를 표시합니다.");
-        })
-        .catch(() => {
-          setUser(null);
-          setRecentMatches([]);
-          setMessage("프로필 정보를 불러오지 못했습니다.");
-        });
-    });
-  }, [params]);
-
-  async function addFriend() {
-    try {
-      const friend = await requestFriend(handle);
-      setMessage(`${friend.user.displayName}에게 친구 요청을 보냈습니다.`);
-    } catch {
-      setMessage("친구 요청을 보내려면 로그인 상태와 대상 핸들을 확인해야 합니다.");
-    }
-  }
+  const { handle } = use(params);
+  const queryClient = useQueryClient();
+  const profileQuery = useQuery(profileQueryOptions(handle));
+  const [notice, setNotice] = useState("");
+  const user = profileQuery.data?.user ?? null;
+  const recentMatches = profileQuery.data?.recentMatches ?? [];
+  const message = notice || (profileQuery.isError
+    ? "프로필 정보를 불러오지 못했습니다."
+    : profileQuery.isPending
+      ? "프로필 정보를 불러오는 중입니다."
+      : "공개 프로필 정보를 표시합니다.");
+  const friendRequest = useMutation({
+    mutationFn: () => requestFriend(handle),
+    onSuccess: async (friend) => {
+      setNotice(`${friend.user.displayName}에게 친구 요청을 보냈습니다.`);
+      await invalidateExactQueries(queryClient, mutationInvalidations.friendRequest());
+    },
+    onError: () => setNotice("친구 요청을 보내려면 로그인 상태와 대상 핸들을 확인해야 합니다.")
+  });
 
   async function shareProfile() {
     try {
       const url = `${window.location.origin}/profile/${handle}`;
       await navigator.clipboard.writeText(url);
-      setMessage("프로필 공유 링크를 복사했습니다.");
+      setNotice("프로필 공유 링크를 복사했습니다.");
     } catch {
-      setMessage("프로필 공유 링크를 복사하지 못했습니다.");
+      setNotice("프로필 공유 링크를 복사하지 못했습니다.");
     }
   }
 
@@ -72,7 +66,7 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
             </div>
           </div>
           <div className="flex gap-3">
-            <button className="focus-ring rounded-lg border border-line px-4 py-3 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted" onClick={addFriend} disabled={user.isNpc}>
+            <button className="focus-ring rounded-lg border border-line px-4 py-3 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted" onClick={() => friendRequest.mutate()} disabled={user.isNpc || friendRequest.isPending}>
               <UserPlus size={18} className="mr-2 inline" />
               친구 추가
             </button>
