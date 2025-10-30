@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, Gamepad2, Home, Shield, Trophy, UserRound, Users } from "lucide-react";
-import type { SessionUser } from "@pong-pong/shared";
-import { getMe } from "@/lib/api";
+import { meQueryOptions } from "@/lib/query";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [me, setMe] = useState<SessionUser | null>(null);
+  const { data: me = null } = useQuery(meQueryOptions());
   const profileHref = me ? `/profile/${me.handle}` : "/";
   const nav = [
     { id: "lobby", href: "/", label: "로비", icon: Home },
@@ -20,10 +19,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { id: "profile", href: profileHref, label: "프로필", icon: UserRound, matchPrefix: "/profile" },
     { id: "admin", href: "/admin", label: "관리", icon: Shield }
   ];
-
-  useEffect(() => {
-    getMe().then(setMe).catch(() => setMe(null));
-  }, []);
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
