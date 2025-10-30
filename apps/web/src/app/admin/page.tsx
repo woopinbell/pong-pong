@@ -1,36 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Shield } from "lucide-react";
-import type { AdminActionSummary, PublicUser } from "@pong-pong/shared";
+import type { PublicUser } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
-import { getAdminActions, getAdminUsers, setUserStatus } from "@/lib/api";
+import { setUserStatus } from "@/lib/api";
+import {
+  adminActionsQueryOptions,
+  adminUsersQueryOptions,
+  invalidateExactQueries,
+  mutationInvalidations
+} from "@/lib/query";
 
 export default function AdminPage() {
-  const [users, setUsers] = useState<PublicUser[]>([]);
-  const [actions, setActions] = useState<AdminActionSummary[]>([]);
+  const queryClient = useQueryClient();
+  const usersQuery = useQuery(adminUsersQueryOptions());
+  const actionsQuery = useQuery(adminActionsQueryOptions());
+  const users = usersQuery.data ?? [];
+  const actions = actionsQuery.data ?? [];
   const [reason, setReason] = useState("운영자 검토");
-  const [message, setMessage] = useState("운영자 계정으로 로그인하면 상태 변경이 저장됩니다.");
+  const [notice, setNotice] = useState("");
+  const message = notice || (usersQuery.isError || actionsQuery.isError
+    ? "운영자 권한이 필요합니다."
+    : usersQuery.isPending || actionsQuery.isPending
+      ? "운영자 계정 정보를 확인하고 있습니다."
+      : "사용자 목록과 감사 로그를 불러왔습니다.");
+  const statusMutation = useMutation({
+    mutationFn: ({ user, nextStatus }: { user: PublicUser; nextStatus: "active" | "banned" }) =>
+      setUserStatus(user.id, nextStatus, reason.trim() || "운영자 검토"),
+    onSuccess: async (updated) => {
+      setNotice(`${updated.displayName} 상태를 ${updated.status === "active" ? "정상" : "정지"}으로 변경했습니다.`);
+      await invalidateExactQueries(queryClient, mutationInvalidations.adminStatus());
+    },
+    onError: () => setNotice("상태 변경은 운영자 권한으로 로그인해야 가능합니다.")
+  });
 
-  useEffect(() => {
-    Promise.all([getAdminUsers(), getAdminActions()])
-      .then(([userItems, actionItems]) => {
-        setUsers(userItems);
-        setActions(actionItems);
-        setMessage("사용자 목록과 감사 로그를 불러왔습니다.");
-      })
-      .catch(() => setMessage("운영자 권한이 필요합니다."));
-  }, []);
-
-  async function toggleUser(user: PublicUser) {
-    try {
-      const updated = await setUserStatus(user.id, user.status === "active" ? "banned" : "active", reason.trim() || "운영자 검토");
-      setUsers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setActions(await getAdminActions());
-      setMessage(`${updated.displayName} 상태를 ${updated.status === "active" ? "정상" : "정지"}으로 변경했습니다.`);
-    } catch {
-      setMessage("상태 변경은 운영자 권한으로 로그인해야 가능합니다.");
-    }
+  function toggleUser(user: PublicUser) {
+    statusMutation.mutate({
+      user,
+      nextStatus: user.status === "active" ? "banned" : "active"
+    });
   }
 
   return (
@@ -68,7 +78,7 @@ export default function AdminPage() {
             </div>
             <span className="text-right font-black text-green-600">{user.rating}</span>
             <span className="text-right text-sm font-black text-ink">{user.status === "active" ? "정상" : "정지"}</span>
-            <button className="focus-ring justify-self-end rounded-lg border border-line px-3 py-2 text-sm font-black text-ink" onClick={() => toggleUser(user)}>
+            <button className="focus-ring justify-self-end rounded-lg border border-line px-3 py-2 text-sm font-black text-ink disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-muted" onClick={() => toggleUser(user)} disabled={statusMutation.isPending}>
               {user.status === "active" ? "정지" : "해제"}
             </button>
           </div>
