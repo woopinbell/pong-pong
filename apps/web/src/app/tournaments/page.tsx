@@ -1,50 +1,61 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trophy } from "lucide-react";
-import type { SessionUser, TournamentMatchSummary, TournamentSummary } from "@pong-pong/shared";
+import type { SessionUser, TournamentMatchSummary } from "@pong-pong/shared";
 import { AppShell } from "@/components/AppShell";
-import { createTournament, getMe, getTournaments, joinTournament } from "@/lib/api";
+import { createTournament, joinTournament } from "@/lib/api";
+import {
+  invalidateExactQueries,
+  meQueryOptions,
+  mutationInvalidations,
+  tournamentsQueryOptions
+} from "@/lib/query";
 
 export default function TournamentsPage() {
-  const [items, setItems] = useState<TournamentSummary[]>([]);
+  const queryClient = useQueryClient();
+  const tournamentsQuery = useQuery(tournamentsQueryOptions());
+  const { data: me = null } = useQuery(meQueryOptions());
+  const items = tournamentsQuery.data ?? [];
   const [selectedId, setSelectedId] = useState("");
-  const [message, setMessage] = useState("대회 목록을 불러오는 중입니다.");
-  const [me, setMe] = useState<SessionUser | null>(null);
+  const [notice, setNotice] = useState("");
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
-
-  useEffect(() => {
-    getMe().then(setMe);
-    getTournaments()
-      .then((tournaments) => {
-        setItems(tournaments);
-        setSelectedId((current) => current || tournaments[0]?.id || "");
-        setMessage(tournaments.length === 0 ? "진행 중인 대회가 없습니다." : "대회를 선택하면 브래킷과 참가 상태를 확인할 수 있습니다.");
-      })
-      .catch(() => setMessage("대회 목록을 불러오지 못했습니다."));
-  }, []);
-
-  async function create() {
-    try {
-      const tournament = await createTournament("새로운 퐁퐁 컵");
-      setItems((current) => [tournament, ...current.filter((item) => item.id !== tournament.id)]);
+  const message = notice || (tournamentsQuery.isError
+    ? "대회 목록을 불러오지 못했습니다."
+    : tournamentsQuery.isPending
+      ? "대회 목록을 불러오는 중입니다."
+      : items.length === 0
+        ? "진행 중인 대회가 없습니다."
+        : "대회를 선택하면 브래킷과 참가 상태를 확인할 수 있습니다.");
+  const createMutation = useMutation({
+    mutationFn: () => createTournament("새로운 퐁퐁 컵"),
+    onSuccess: async (tournament) => {
       setSelectedId(tournament.id);
-      setMessage(`${tournament.name}을 생성했습니다.`);
-    } catch {
-      setMessage("토너먼트 생성에는 로그인이 필요합니다.");
+      setNotice(`${tournament.name}을 생성했습니다.`);
+      await invalidateExactQueries(queryClient, mutationInvalidations.tournamentChange());
+    },
+    onError: () => setNotice("토너먼트 생성에는 로그인이 필요합니다.")
+  });
+  const joinMutation = useMutation({
+    mutationFn: (id: string) => joinTournament(id),
+    onSuccess: async (tournament) => {
+      setSelectedId(tournament.id);
+      setNotice(`${tournament.name}에 참가했습니다.`);
+      await invalidateExactQueries(queryClient, mutationInvalidations.tournamentChange());
+    },
+    onError: () => setNotice("토너먼트 참가에는 로그인이 필요합니다.")
+  });
+
+  function create() {
+    if (!createMutation.isPending) {
+      createMutation.mutate();
     }
   }
 
-  async function join() {
+  function join() {
     if (!selected) return;
-    try {
-      const tournament = await joinTournament(selected.id);
-      setItems((current) => current.map((item) => (item.id === tournament.id ? tournament : item)));
-      setSelectedId(tournament.id);
-      setMessage(`${tournament.name}에 참가했습니다.`);
-    } catch {
-      setMessage("토너먼트 참가에는 로그인이 필요합니다.");
-    }
+    joinMutation.mutate(selected.id);
   }
 
   return (
@@ -55,7 +66,7 @@ export default function TournamentsPage() {
           <p className="mt-2 text-sm font-semibold text-muted">4인 싱글 엘리미네이션으로 짧은 컵 대회를 운영합니다.</p>
           <p className="mt-2 text-sm font-bold text-blue-700">{message}</p>
         </div>
-        <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={create}>
+        <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" onClick={create} disabled={createMutation.isPending}>
           <Plus size={18} className="mr-2 inline" />
           토너먼트 생성
         </button>
@@ -71,7 +82,7 @@ export default function TournamentsPage() {
                 className={`focus-ring rounded-lg border p-4 text-left hover:border-blue-300 ${selected?.id === item.id ? "border-blue-500 bg-blue-50" : "border-line"}`}
                 onClick={() => {
                   setSelectedId(item.id);
-                  setMessage(`${item.name}을 선택했습니다.`);
+                  setNotice(`${item.name}을 선택했습니다.`);
                 }}
               >
                 <p className="font-black text-ink">{item.name}</p>
@@ -95,7 +106,7 @@ export default function TournamentsPage() {
                   {selected.winner ? ` · 우승 ${selected.winner.displayName}` : ""}
                 </p>
               </div>
-              <button className="focus-ring rounded-lg bg-green-600 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" onClick={join} disabled={selected.playerCount >= selected.capacity}>
+              <button className="focus-ring rounded-lg bg-green-600 px-4 py-2 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" onClick={join} disabled={selected.playerCount >= selected.capacity || joinMutation.isPending}>
                 참가
               </button>
             </div>
