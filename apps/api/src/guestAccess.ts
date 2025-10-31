@@ -8,6 +8,9 @@ import {
 import type { SessionUser } from "@pong-pong/shared";
 
 export const GUEST_SESSION_TTL_SECONDS = 2 * 60 * 60;
+export const DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE = 10;
+
+const CREATION_WINDOW_MS = 60_000;
 
 export type GuestSessionUser = SessionUser & {
   sessionKind: "guest";
@@ -23,16 +26,30 @@ type GuestPayload = {
 type GuestAccessOptions = {
   secret: string;
   clock?: () => number;
+  creationLimitPerMinute?: number;
 };
+
+export class GuestAccessError extends Error {
+  constructor(
+    readonly code: "guest_creation_rate_limited" | "guest_ticket_limit_reached",
+    message: string
+  ) {
+    super(message);
+    this.name = "GuestAccessError";
+  }
+}
 
 export class GuestAccess {
   private readonly clock: () => number;
+  private readonly creationLimitPerMinute: number;
+  private readonly creationsByIp = new Map<string, number[]>();
 
   constructor(private readonly options: GuestAccessOptions) {
     if (Buffer.byteLength(options.secret, "utf8") < 32) {
       throw new Error("Guest session secret must be at least 32 bytes");
     }
     this.clock = options.clock ?? Date.now;
+    this.creationLimitPerMinute = options.creationLimitPerMinute ?? DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE;
   }
 
   createSession(ip: string): {
@@ -40,6 +57,7 @@ export class GuestAccess {
     cookieValue: string;
     expiresInSeconds: number;
   } {
+    this.recordCreation(ip);
     const handleSuffix = randomBytes(6).toString("hex");
     const user: GuestSessionUser = {
       id: randomUUID(),
@@ -95,6 +113,16 @@ export class GuestAccess {
     } catch {
       return null;
     }
+  }
+
+  private recordCreation(ip: string): void {
+    const cutoff = this.clock() - CREATION_WINDOW_MS;
+    const recent = (this.creationsByIp.get(ip) ?? []).filter((createdAt) => createdAt > cutoff);
+    if (recent.length >= this.creationLimitPerMinute) {
+      throw new GuestAccessError("guest_creation_rate_limited", "게스트 생성 요청이 너무 많습니다. 잠시 후 다시 시도해주세요.");
+    }
+    recent.push(this.clock());
+    this.creationsByIp.set(ip, recent);
   }
 
   private sign(payload: string): string {
