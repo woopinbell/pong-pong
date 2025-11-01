@@ -6,9 +6,11 @@ import {
   timingSafeEqual
 } from "node:crypto";
 import type { SessionUser } from "@pong-pong/shared";
+import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket.js";
 
 export const GUEST_SESSION_TTL_SECONDS = 2 * 60 * 60;
 export const DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE = 10;
+export const DEFAULT_GUEST_TICKET_LIMIT = 400;
 
 const CREATION_WINDOW_MS = 60_000;
 
@@ -27,6 +29,7 @@ type GuestAccessOptions = {
   secret: string;
   clock?: () => number;
   creationLimitPerMinute?: number;
+  ticketLimit?: number;
 };
 
 export class GuestAccessError extends Error {
@@ -42,7 +45,14 @@ export class GuestAccessError extends Error {
 export class GuestAccess {
   private readonly clock: () => number;
   private readonly creationLimitPerMinute: number;
+  private readonly ticketLimit: number;
   private readonly creationsByIp = new Map<string, number[]>();
+  private readonly tickets = new Map<string, {
+    user: GuestSessionUser;
+    expiresAtMs: number;
+    cleanupTimer: NodeJS.Timeout;
+  }>();
+  private readonly ticketHashByGuest = new Map<string, string>();
 
   constructor(private readonly options: GuestAccessOptions) {
     if (Buffer.byteLength(options.secret, "utf8") < 32) {
@@ -50,6 +60,12 @@ export class GuestAccess {
     }
     this.clock = options.clock ?? Date.now;
     this.creationLimitPerMinute = options.creationLimitPerMinute ?? DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE;
+    this.ticketLimit = options.ticketLimit ?? DEFAULT_GUEST_TICKET_LIMIT;
+  }
+
+  get activeTicketCount(): number {
+    this.pruneExpiredTickets();
+    return this.tickets.size;
   }
 
   createSession(ip: string): {
@@ -115,6 +131,46 @@ export class GuestAccess {
     }
   }
 
+  issueWsTicket(user: GuestSessionUser): string {
+    this.pruneExpiredTickets();
+    const previousHash = this.ticketHashByGuest.get(user.id);
+    if (previousHash) {
+      const previous = this.tickets.get(previousHash);
+      if (previous) clearTimeout(previous.cleanupTimer);
+      this.tickets.delete(previousHash);
+      this.ticketHashByGuest.delete(user.id);
+    }
+    if (this.tickets.size >= this.ticketLimit) {
+      throw new GuestAccessError(
+        "guest_ticket_limit_reached",
+        "게스트 연결 요청이 많습니다. 잠시 후 다시 시도해주세요."
+      );
+    }
+    const ticket = createRawWsTicket();
+    const ticketHash = hashWsTicket(ticket);
+    const expiresAtMs = this.clock() + (WS_TICKET_TTL_SECONDS * 1_000);
+    const cleanupTimer = setTimeout(() => this.deleteTicket(ticketHash), WS_TICKET_TTL_SECONDS * 1_000);
+    cleanupTimer.unref();
+    this.tickets.set(ticketHash, {
+      user,
+      expiresAtMs,
+      cleanupTimer
+    });
+    this.ticketHashByGuest.set(user.id, ticketHash);
+    return ticket;
+  }
+
+  consumeWsTicket(ticketHash: string): GuestSessionUser | null {
+    const stored = this.tickets.get(ticketHash);
+    if (stored) clearTimeout(stored.cleanupTimer);
+    this.tickets.delete(ticketHash);
+    if (stored && this.ticketHashByGuest.get(stored.user.id) === ticketHash) {
+      this.ticketHashByGuest.delete(stored.user.id);
+    }
+    if (!stored || this.clock() >= stored.expiresAtMs) return null;
+    return stored.user;
+  }
+
   private recordCreation(ip: string): void {
     const cutoff = this.clock() - CREATION_WINDOW_MS;
     const recent = (this.creationsByIp.get(ip) ?? []).filter((createdAt) => createdAt > cutoff);
@@ -123,6 +179,27 @@ export class GuestAccess {
     }
     recent.push(this.clock());
     this.creationsByIp.set(ip, recent);
+  }
+
+  private pruneExpiredTickets(): void {
+    const nowMs = this.clock();
+    for (const [ticketHash, ticket] of this.tickets) {
+      if (nowMs < ticket.expiresAtMs) continue;
+      clearTimeout(ticket.cleanupTimer);
+      this.tickets.delete(ticketHash);
+      if (this.ticketHashByGuest.get(ticket.user.id) === ticketHash) {
+        this.ticketHashByGuest.delete(ticket.user.id);
+      }
+    }
+  }
+
+  private deleteTicket(ticketHash: string): void {
+    const ticket = this.tickets.get(ticketHash);
+    if (!ticket) return;
+    this.tickets.delete(ticketHash);
+    if (this.ticketHashByGuest.get(ticket.user.id) === ticketHash) {
+      this.ticketHashByGuest.delete(ticket.user.id);
+    }
   }
 
   private sign(payload: string): string {
