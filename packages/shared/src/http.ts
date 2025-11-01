@@ -192,6 +192,11 @@ export const wsHandshakeQuerySchema = z.object({
 export const okResponseSchema = z.object({ ok: z.literal(true) });
 export const healthResponseSchema = z.object({ ok: z.literal(true), service: z.literal("pong-pong-api") });
 export const userResponseSchema = z.object({ user: sessionUserSchema });
+export const guestAuthResponseSchema = z.object({
+  user: sessionUserSchema,
+  guest: z.literal(true),
+  expiresInSeconds: z.literal(7_200)
+});
 export const publicUserResponseSchema = z.object({ user: publicUserSchema });
 export const profileResponseSchema = z.object({ user: publicUserSchema, recentMatches: z.array(matchSummarySchema) });
 export const ownProfileResponseSchema = z.object({ profile: sessionUserSchema });
@@ -212,3 +217,4 @@ export const wsTicketResponseSchema = z.object({
 export type DevLoginBody = z.infer<typeof devLoginBodySchema>;
 export type ProfileUpdateBody = z.infer<typeof profileUpdateBodySchema>;
 export type WsTicketResponse = z.infer<typeof wsTicketResponseSchema>;
+export type GuestAuthResponse = z.infer<typeof guestAuthResponseSchema>;
