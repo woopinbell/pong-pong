@@ -10,6 +10,8 @@ import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTick
 
 export const GUEST_SESSION_TTL_SECONDS = 2 * 60 * 60;
 export const DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE = 10;
+export const DEFAULT_GUEST_CONNECTIONS_PER_IP = 4;
+export const DEFAULT_GUEST_CONNECTION_LIMIT = 200;
 export const DEFAULT_GUEST_TICKET_LIMIT = 400;
 
 const CREATION_WINDOW_MS = 60_000;
@@ -29,7 +31,13 @@ type GuestAccessOptions = {
   secret: string;
   clock?: () => number;
   creationLimitPerMinute?: number;
+  connectionsPerIp?: number;
+  connectionLimit?: number;
   ticketLimit?: number;
+};
+
+type ConnectionLease = {
+  release(): void;
 };
 
 export class GuestAccessError extends Error {
@@ -45,6 +53,8 @@ export class GuestAccessError extends Error {
 export class GuestAccess {
   private readonly clock: () => number;
   private readonly creationLimitPerMinute: number;
+  private readonly connectionsPerIp: number;
+  private readonly connectionLimit: number;
   private readonly ticketLimit: number;
   private readonly creationsByIp = new Map<string, number[]>();
   private readonly tickets = new Map<string, {
@@ -53,6 +63,7 @@ export class GuestAccess {
     cleanupTimer: NodeJS.Timeout;
   }>();
   private readonly ticketHashByGuest = new Map<string, string>();
+  private readonly connections = new Map<string, { ip: string; leaseId: string }>();
 
   constructor(private readonly options: GuestAccessOptions) {
     if (Buffer.byteLength(options.secret, "utf8") < 32) {
@@ -60,7 +71,13 @@ export class GuestAccess {
     }
     this.clock = options.clock ?? Date.now;
     this.creationLimitPerMinute = options.creationLimitPerMinute ?? DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE;
+    this.connectionsPerIp = options.connectionsPerIp ?? DEFAULT_GUEST_CONNECTIONS_PER_IP;
+    this.connectionLimit = options.connectionLimit ?? DEFAULT_GUEST_CONNECTION_LIMIT;
     this.ticketLimit = options.ticketLimit ?? DEFAULT_GUEST_TICKET_LIMIT;
+  }
+
+  get activeConnectionCount(): number {
+    return this.connections.size;
   }
 
   get activeTicketCount(): number {
@@ -171,6 +188,27 @@ export class GuestAccess {
     return stored.user;
   }
 
+  acquireConnection(ip: string, guestId: string): ConnectionLease | null {
+    const current = this.connections.get(guestId);
+    const leaseId = randomUUID();
+    if (current) {
+      if (current.ip !== ip) {
+        const connectionsForIp = [...this.connections.values()]
+          .filter((connection) => connection.ip === ip).length;
+        if (connectionsForIp >= this.connectionsPerIp) return null;
+      }
+      this.connections.set(guestId, { ip, leaseId });
+      return this.lease(guestId, leaseId);
+    }
+
+    const connectionsForIp = [...this.connections.values()].filter((connection) => connection.ip === ip).length;
+    if (connectionsForIp >= this.connectionsPerIp || this.connections.size >= this.connectionLimit) {
+      return null;
+    }
+    this.connections.set(guestId, { ip, leaseId });
+    return this.lease(guestId, leaseId);
+  }
+
   private recordCreation(ip: string): void {
     const cutoff = this.clock() - CREATION_WINDOW_MS;
     const recent = (this.creationsByIp.get(ip) ?? []).filter((createdAt) => createdAt > cutoff);
@@ -179,6 +217,14 @@ export class GuestAccess {
     }
     recent.push(this.clock());
     this.creationsByIp.set(ip, recent);
+  }
+
+  private lease(guestId: string, leaseId: string): ConnectionLease {
+    return {
+      release: () => {
+        if (this.connections.get(guestId)?.leaseId === leaseId) this.connections.delete(guestId);
+      }
+    };
   }
 
   private pruneExpiredTickets(): void {
