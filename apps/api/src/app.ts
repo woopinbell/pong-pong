@@ -226,18 +226,19 @@ export function buildApp({
   });
 
   app.get("/me", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
     return parseOutput(http.userResponseSchema, { user });
   });
 
   app.get("/auth/me", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
     return parseOutput(http.userResponseSchema, { user });
   });
 
   app.get("/users/:id", async (request) => {
+    if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
     const { id } = parseInput(http.idParamsSchema, request.params);
     const user = await repo.getUserById(id);
     if (!user) notFound("사용자를 찾을 수 없습니다.");
@@ -245,19 +246,21 @@ export function buildApp({
   });
 
   app.get("/lobby", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
+    const guest = isGuestSession(user);
     return parseOutput(http.lobbyResponseSchema, {
       me: user,
       onlinePlayers: hub.onlinePlayers(),
-      recentMatches: await repo.listRecentMatches(user?.id),
-      chat: await repo.listLobbyChat(),
+      recentMatches: appMode === "demo" || guest ? [] : await repo.listRecentMatches(user?.id),
+      chat: appMode === "demo" || guest ? [] : await repo.listLobbyChat(),
       stats: hub.liveStats()
     });
   });
 
   app.post("/chat/lobby", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     if (!isActive(user)) suspended();
     const body = parseInput(http.chatBodySchema, request.body);
     return parseOutput(http.chatResponseSchema, {
@@ -270,17 +273,20 @@ export function buildApp({
     });
   });
 
-  app.get("/leaderboard", async () => parseOutput(http.leaderboardResponseSchema, {
-    entries: await repo.listLeaderboard()
-  }));
+  app.get("/leaderboard", async () => {
+    if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
+    return parseOutput(http.leaderboardResponseSchema, { entries: await repo.listLeaderboard() });
+  });
 
   app.get("/dashboard", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     return parseOutput(http.dashboardSummarySchema, await repo.getDashboard(user.id));
   });
 
   app.get("/profile/:handle", async (request) => {
+    if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
     const { handle } = parseInput(http.handleParamsSchema, request.params);
     const user = await repo.getUserByHandle(handle);
     if (!user) notFound("프로필을 찾을 수 없습니다.");
@@ -331,9 +337,10 @@ export function buildApp({
     return parseOutput(http.friendResponseSchema, { friend: await repo.acceptFriend(user.id, id) });
   });
 
-  app.get("/tournaments", async () => parseOutput(http.tournamentsResponseSchema, {
-    tournaments: await repo.listTournaments()
-  }));
+  app.get("/tournaments", async () => {
+    if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
+    return parseOutput(http.tournamentsResponseSchema, { tournaments: await repo.listTournaments() });
+  });
 
   app.post("/tournaments", async (request) => {
     const user = await currentUser(repo, request);
