@@ -6,8 +6,9 @@ import type { AppRepository } from "@pong-pong/db";
 import * as http from "@pong-pong/shared";
 import type { SessionUser } from "@pong-pong/shared";
 import { WebSocket, type RawData } from "ws";
-import { GameHub } from "./gameHub";
+import { GameHub } from "./gameHub.js";
 import {
+  ApiHttpError,
   forbidden,
   installHttpErrorBoundary,
   notFound,
@@ -15,9 +16,15 @@ import {
   parseOutput,
   suspended,
   unauthorized
-} from "./httpBoundary";
-import { createLoggerOptions } from "./requestLogging";
-import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket";
+} from "./httpBoundary.js";
+import {
+  GUEST_SESSION_TTL_SECONDS,
+  GuestAccess,
+  GuestAccessError,
+  type GuestSessionUser
+} from "./guestAccess.js";
+import { createLoggerOptions } from "./requestLogging.js";
+import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket.js";
 
 const WS_POLICY_VIOLATION = 1008;
 const WS_MESSAGE_TOO_BIG = 1009;
@@ -31,11 +38,26 @@ export interface BuildAppOptions {
   repo: AppRepository;
   webOrigin: string;
   appMode?: AppMode;
+  guestAccess?: GuestAccess;
+  sessionSecret?: string;
+  trustProxy?: boolean;
 }
 
-export function buildApp({ repo, webOrigin, appMode = readAppMode() }: BuildAppOptions) {
-  const app = Fastify({ logger: createLoggerOptions(process.env.LOG_LEVEL ?? "info") });
+export function buildApp({
+  repo,
+  webOrigin,
+  appMode = readAppMode(),
+  guestAccess,
+  sessionSecret = process.env.SESSION_SECRET ?? "dev-session-secret",
+  trustProxy = false
+}: BuildAppOptions) {
+  const app = Fastify({
+    logger: createLoggerOptions(process.env.LOG_LEVEL ?? "info"),
+    trustProxy
+  });
   const hub = new GameHub(repo);
+  const guests = appMode === "demo" ? guestAccess ?? new GuestAccess({ secret: sessionSecret }) : null;
+  const getCurrentUser = (request: FastifyRequest) => currentUser(repo, request, guests, appMode === "demo");
 
   installHttpErrorBoundary(app);
   app.register(cors, {
@@ -312,7 +334,14 @@ function readSessionToken(request: FastifyRequest): string | undefined {
   return request.cookies?.pp_session;
 }
 
-async function currentUser(repo: AppRepository, request: FastifyRequest): Promise<SessionUser | null> {
+async function currentUser(
+  repo: AppRepository,
+  request: FastifyRequest,
+  guests: GuestAccess | null = null,
+  guestOnly = false
+): Promise<SessionUser | GuestSessionUser | null> {
+  const guest = guests?.authenticate(request.cookies?.pp_guest, request.ip) ?? null;
+  if (guest || guestOnly) return guest;
   return repo.getSessionUser(readSessionToken(request));
 }
 
