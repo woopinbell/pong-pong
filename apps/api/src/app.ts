@@ -297,14 +297,16 @@ export function buildApp({
   });
 
   app.get("/profile/me", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     return parseOutput(http.ownProfileResponseSchema, { profile: user });
   });
 
   app.patch("/profile/me", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     const body = parseInput(http.profileUpdateBodySchema, request.body);
     return parseOutput(http.ownProfileResponseSchema, {
       profile: await repo.updateProfile(user.id, body)
@@ -312,14 +314,16 @@ export function buildApp({
   });
 
   app.get("/friends", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     return parseOutput(http.friendsResponseSchema, { friends: await repo.listFriends(user.id) });
   });
 
   const requestFriend = async (request: FastifyRequest) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     if (!isActive(user)) suspended();
     const body = parseInput(http.friendRequestBodySchema, request.body);
     return parseOutput(http.friendResponseSchema, {
@@ -331,8 +335,9 @@ export function buildApp({
   app.post("/friends", requestFriend);
 
   app.post("/friends/:id/accept", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     const { id } = parseInput(http.idParamsSchema, request.params);
     return parseOutput(http.friendResponseSchema, { friend: await repo.acceptFriend(user.id, id) });
   });
@@ -343,8 +348,9 @@ export function buildApp({
   });
 
   app.post("/tournaments", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     if (!isActive(user)) suspended();
     const body = parseInput(http.tournamentCreateBodySchema, request.body);
     return parseOutput(http.tournamentResponseSchema, {
@@ -353,40 +359,43 @@ export function buildApp({
   });
 
   app.post("/tournaments/:id/join", async (request) => {
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
+    requireRegistered(user);
     if (!isActive(user)) suspended();
     const { id } = parseInput(http.idParamsSchema, request.params);
     return parseOutput(http.tournamentResponseSchema, { tournament: await repo.joinTournament(id, user.id) });
   });
 
-  app.get("/admin/users", async (request) => {
-    const user = await requireAdmin(repo, request);
-    return parseOutput(http.adminUsersResponseSchema, { users: await repo.listAdminUsers() });
-  });
-
-  app.get("/admin/actions", async (request) => {
-    await requireAdmin(repo, request);
-    return parseOutput(http.adminActionsResponseSchema, { actions: await repo.listAdminActions() });
-  });
-
-  app.post("/admin/users/:id/ban", async (request) => {
-    const user = await requireAdmin(repo, request);
-    const { id } = parseInput(http.idParamsSchema, request.params);
-    const body = parseInput(http.adminBanBodySchema, request.body ?? {});
-    return parseOutput(http.publicUserResponseSchema, {
-      user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review")
+  if (appMode !== "demo") {
+    app.get("/admin/users", async (request) => {
+      const user = await requireAdmin(repo, request);
+      return parseOutput(http.adminUsersResponseSchema, { users: await repo.listAdminUsers() });
     });
-  });
 
-  app.patch("/admin/users/:id/status", async (request) => {
-    const user = await requireAdmin(repo, request);
-    const { id } = parseInput(http.idParamsSchema, request.params);
-    const body = parseInput(http.adminStatusBodySchema, request.body);
-    return parseOutput(http.publicUserResponseSchema, {
-      user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review")
+    app.get("/admin/actions", async (request) => {
+      await requireAdmin(repo, request);
+      return parseOutput(http.adminActionsResponseSchema, { actions: await repo.listAdminActions() });
     });
-  });
+
+    app.post("/admin/users/:id/ban", async (request) => {
+      const user = await requireAdmin(repo, request);
+      const { id } = parseInput(http.idParamsSchema, request.params);
+      const body = parseInput(http.adminBanBodySchema, request.body ?? {});
+      return parseOutput(http.publicUserResponseSchema, {
+        user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review")
+      });
+    });
+
+    app.patch("/admin/users/:id/status", async (request) => {
+      const user = await requireAdmin(repo, request);
+      const { id } = parseInput(http.idParamsSchema, request.params);
+      const body = parseInput(http.adminStatusBodySchema, request.body);
+      return parseOutput(http.publicUserResponseSchema, {
+        user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review")
+      });
+    });
+  }
 
   return app;
 }
