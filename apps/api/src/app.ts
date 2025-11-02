@@ -109,7 +109,14 @@ export function buildApp({
         return;
       }
 
-      repo.consumeWsTicket(hashWsTicket(parsedQuery.data.ticket))
+      const ticketHash = hashWsTicket(parsedQuery.data.ticket);
+      const guestUser = guests?.consumeWsTicket(ticketHash) ?? null;
+      const authenticated = guestUser
+        ? Promise.resolve(guestUser)
+        : appMode === "demo"
+          ? Promise.resolve(null)
+          : repo.consumeWsTicket(ticketHash);
+      authenticated
         .then((user) => {
           if (!user) {
             closeAuthentication(WS_POLICY_VIOLATION, "invalid websocket ticket");
@@ -118,6 +125,12 @@ export function buildApp({
           if (authenticationClosed || socket.readyState !== WebSocket.OPEN) {
             return;
           }
+          const lease = isGuestSession(user) ? guests?.acquireConnection(request.ip, user.id) : null;
+          if (isGuestSession(user) && !lease) {
+            closeAuthentication(WS_POLICY_VIOLATION, "guest connection limit exceeded");
+            return;
+          }
+          if (lease) socket.once("close", () => lease.release());
           socket.off("message", bufferPayload);
           hub.connect(socket as WebSocket, request.raw, user, pendingPayloads);
         })
@@ -146,24 +159,65 @@ export function buildApp({
     });
   }
 
+  if (appMode === "demo" && guests) {
+    app.post("/auth/guest", async (request, reply) => {
+      parseInput(http.emptyParamsSchema, request.body ?? {});
+      try {
+        const session = guests.createSession(request.ip);
+        reply.setCookie("pp_guest", session.cookieValue, {
+          path: "/",
+          sameSite: "lax",
+          httpOnly: true,
+          secure: true,
+          maxAge: GUEST_SESSION_TTL_SECONDS
+        });
+        return parseOutput(http.guestAuthResponseSchema, {
+          user: session.user,
+          guest: true,
+          expiresInSeconds: session.expiresInSeconds
+        });
+      } catch (error) {
+        if (error instanceof GuestAccessError) {
+          throw new ApiHttpError(429, error.code, error.message);
+        }
+        throw error;
+      }
+    });
+  }
+
   app.post("/auth/logout", async (request, reply) => {
-    await repo.deleteSession(readSessionToken(request));
+    if (!isGuestSession(await getCurrentUser(request))) {
+      await repo.deleteSession(readSessionToken(request));
+    }
     reply.clearCookie("pp_session", { path: "/" });
+    reply.clearCookie("pp_guest", { path: "/" });
     return parseOutput(http.okResponseSchema, { ok: true });
   });
 
   app.post("/auth/ws-ticket", async (request) => {
     parseInput(http.emptyParamsSchema, request.body ?? {});
-    const user = await currentUser(repo, request);
+    const user = await getCurrentUser(request);
     if (!user) unauthorized();
     if (!isActive(user)) suspended();
 
-    const ticket = createRawWsTicket();
-    await repo.createWsTicket({
-      userId: user.id,
-      ticketHash: hashWsTicket(ticket),
-      ttlSeconds: WS_TICKET_TTL_SECONDS
-    });
+    let ticket: string;
+    try {
+      ticket = isGuestSession(user) && guests
+        ? guests.issueWsTicket(user)
+        : createRawWsTicket();
+    } catch (error) {
+      if (error instanceof GuestAccessError) {
+        throw new ApiHttpError(429, error.code, error.message);
+      }
+      throw error;
+    }
+    if (!isGuestSession(user)) {
+      await repo.createWsTicket({
+        userId: user.id,
+        ticketHash: hashWsTicket(ticket),
+        ttlSeconds: WS_TICKET_TTL_SECONDS
+      });
+    }
     return parseOutput(http.wsTicketResponseSchema, {
       ticket,
       expiresInSeconds: WS_TICKET_TTL_SECONDS,
@@ -354,6 +408,16 @@ async function requireAdmin(repo: AppRepository, request: FastifyRequest): Promi
 
 function isActive(user: SessionUser): boolean {
   return user.status === "active";
+}
+
+function isGuestSession(user: SessionUser | GuestSessionUser | null): user is GuestSessionUser {
+  return Boolean(user && "sessionKind" in user && user.sessionKind === "guest");
+}
+
+function requireRegistered(user: SessionUser | GuestSessionUser): void {
+  if (isGuestSession(user)) {
+    throw new ApiHttpError(403, "guest_feature_forbidden", "게스트 계정에서는 사용할 수 없는 기능입니다.");
+  }
 }
 
 function readAppMode(input = process.env): AppMode {
