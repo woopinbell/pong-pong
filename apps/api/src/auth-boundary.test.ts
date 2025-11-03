@@ -116,7 +116,12 @@ describe("dev-login availability", () => {
   ])("does not expose dev-login in the $appMode runtime", async ({ appMode }) => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData(appMode === "demo" ? "demo" : "development");
-    const app = buildApp({ repo, webOrigin: "http://localhost:3000", appMode });
+    const app = buildApp({
+      repo,
+      webOrigin: "http://localhost:3000",
+      appMode,
+      sessionSecret: "auth-boundary-test-secret-at-least-32-bytes"
+    });
     await app.ready();
 
     try {
