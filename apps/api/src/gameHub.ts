@@ -69,6 +69,7 @@ const NPC_QUEUE_FALLBACK_MS = 6000;
 const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
+const GUEST_RESULT_RETENTION_MS = 2 * 60 * 1_000;
 
 export class GameHub {
   private readonly clients = new Map<string, Client>();
@@ -78,10 +79,19 @@ export class GameHub {
   private readonly tournamentWaiters = new Map<string, Client[]>();
   private readonly waitSamples: number[] = [];
   private readonly inputGate = new InputGate();
+  private readonly recentGuestResults = new Map<string, {
+    result: GameFinished;
+    expiresAtMs: number;
+    cleanupTimer: NodeJS.Timeout;
+  }>();
 
   constructor(private readonly repo: AppRepository) {}
 
-  connect(socket: WebSocket, _request: IncomingMessage, user: SessionUser, pendingPayloads: string[] = []): void {
+  get retainedGuestResultCount(): number {
+    return this.recentGuestResults.size;
+  }
+
+  connect(socket: WebSocket, _request: IncomingMessage, user: ConnectedUser, pendingPayloads: string[] = []): void {
     const heartbeat = new ConnectionHeartbeat({
       ping: () => {
         if (socket.readyState === WebSocket.OPEN) socket.ping();
@@ -102,8 +112,12 @@ export class GameHub {
     socket.on("message", (payload) => this.receive(client, payload.toString()));
     socket.on("pong", () => heartbeat.acknowledge());
     socket.on("close", () => this.disconnect(client));
-    if (previous) this.replaceConnection(previous, client);
-    else this.recoverConnection(client);
+    if (previous) {
+      this.replaceConnection(previous, client);
+      if (!client.roomId) this.sendRecentGuestResult(client);
+    } else if (!this.recoverConnection(client)) {
+      this.sendRecentGuestResult(client);
+    }
     if (this.clients.get(client.id) === client && socket.readyState === WebSocket.OPEN) {
       heartbeat.start();
     }
@@ -622,6 +636,21 @@ export class GameHub {
     const rightUser = room.clients.right?.user ?? room.npcUser ?? null;
     const winner = winnerSide === "left" ? leftUser : rightUser;
     const loser = winnerSide === "left" ? rightUser : leftUser;
+    if (room.guest) {
+      const result: GameFinished = {
+        roomId: room.id,
+        matchId: null,
+        persisted: false,
+        winnerSide,
+        leftScore: room.snapshot.state.leftScore,
+        rightScore: room.snapshot.state.rightScore,
+        ratingDelta: 0
+      };
+      this.rememberGuestResult(room, result);
+      this.broadcastRoom(room.id, { type: "game.finished", result });
+      this.removeFinishedRoom(room);
+      return;
+    }
     const finalized = await this.repo.finalizeMatch({
       resultKey: `room:${room.id}:finished`,
       mode: room.mode,
@@ -646,6 +675,39 @@ export class GameHub {
       ratingDelta: 16
     };
     this.broadcastRoom(room.id, { type: "game.finished", result });
+    this.removeFinishedRoom(room);
+  }
+
+  private rememberGuestResult(room: Room, result: GameFinished): void {
+    const expiresAtMs = Date.now() + GUEST_RESULT_RETENTION_MS;
+    for (const client of Object.values(room.clients)) {
+      if (client && isGuest(client.user)) {
+        const userId = client.user.id;
+        const previous = this.recentGuestResults.get(userId);
+        if (previous) clearTimeout(previous.cleanupTimer);
+        const cleanupTimer = setTimeout(() => {
+          const current = this.recentGuestResults.get(userId);
+          if (current?.expiresAtMs === expiresAtMs) this.recentGuestResults.delete(userId);
+        }, GUEST_RESULT_RETENTION_MS);
+        cleanupTimer.unref();
+        this.recentGuestResults.set(userId, { result, expiresAtMs, cleanupTimer });
+      }
+    }
+  }
+
+  private sendRecentGuestResult(client: Client): void {
+    if (!isGuest(client.user)) return;
+    const recent = this.recentGuestResults.get(client.user.id);
+    if (!recent) return;
+    if (Date.now() > recent.expiresAtMs) {
+      clearTimeout(recent.cleanupTimer);
+      this.recentGuestResults.delete(client.user.id);
+      return;
+    }
+    this.send(client, { type: "game.finished", result: recent.result });
+  }
+
+  private removeFinishedRoom(room: Room): void {
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
     }
