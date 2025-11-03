@@ -21,11 +21,14 @@ import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestS
 import { PongAi } from "./game/pongAi";
 import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
 import { RoomSession } from "./game/roomSession";
+import type { GuestSessionUser } from "./guestAccess.js";
+
+type ConnectedUser = SessionUser | GuestSessionUser;
 
 type Client = {
   id: string;
   socket: WebSocket;
-  user: SessionUser;
+  user: ConnectedUser;
   roomId: string | null;
   heartbeat: ConnectionHeartbeat;
   snapshots: LatestSnapshotBuffer;
@@ -113,6 +116,14 @@ export class GameHub {
     if (this.clients.get(client.id) !== client) return;
     try {
       const event = parseClientEvent(payload);
+      if (isGuest(client.user) && (event.type === "chat.send" || event.type === "tournament.join")) {
+        this.send(client, {
+          type: "error",
+          code: "forbidden",
+          message: "게스트 계정에서는 사용할 수 없는 기능입니다."
+        });
+        return;
+      }
       if (event.type === "queue.join") await this.joinQueue(client, event.mode);
       if (event.type === "queue.leave") this.leaveQueue(client);
       if (event.type === "tournament.join") await this.joinTournamentMatch(client, event.matchId);
@@ -422,6 +433,7 @@ export class GameHub {
   onlinePlayers(): PublicUser[] {
     const users = new Map<string, PublicUser>();
     for (const client of this.clients.values()) {
+      if (isGuest(client.user)) continue;
       const { email: _email, ...user } = client.user;
       users.set(user.id, { ...user, online: true });
     }
@@ -684,6 +696,10 @@ function sideFor(room: Room, client: Client): PlayerSide | null {
   if (room.clients.left?.id === client.id) return "left";
   if (room.clients.right?.id === client.id) return "right";
   return null;
+}
+
+function isGuest(user: ConnectedUser): user is GuestSessionUser {
+  return "sessionKind" in user && user.sessionKind === "guest";
 }
 
 function clearQueueTimer(entry: QueueEntry): void {
