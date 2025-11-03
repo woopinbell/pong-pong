@@ -62,6 +62,7 @@ type Room = {
   session: RoomSession;
   reconnectTimer: NodeJS.Timeout | null;
   disconnectedUsers: Partial<Record<PlayerSide, string>>;
+  guest: boolean;
 };
 
 const NPC_QUEUE_FALLBACK_MS = 6000;
@@ -324,8 +325,9 @@ export class GameHub {
   private async matchQueuedClientWithNpc(entry: QueueEntry): Promise<void> {
     const index = this.queue.findIndex((queued) => queued.client.id === entry.client.id);
     if (index < 0 || entry.client.socket.readyState !== WebSocket.OPEN || entry.client.roomId) return;
-    const npc = await this.findClosestNpc(entry.client);
-    if (!npc) return;
+    const guest = isGuest(entry.client.user);
+    const npc = guest ? null : await this.findClosestNpc(entry.client);
+    if (!guest && !npc) return;
     const [queued] = this.queue.splice(index, 1);
     clearQueueTimer(queued);
     this.recordWaitSample(queued.queuedAt);
@@ -382,6 +384,7 @@ export class GameHub {
     let bestDistance = Number.POSITIVE_INFINITY;
     for (let index = 0; index < this.queue.length; index += 1) {
       const candidate = this.queue[index];
+      if (isGuest(candidate.client.user) !== isGuest(client.user)) continue;
       const distance = Math.abs(candidate.client.user.rating - client.user.rating);
       if (distance < bestDistance) {
         bestDistance = distance;
@@ -470,6 +473,7 @@ export class GameHub {
       session,
       reconnectTimer: null,
       disconnectedUsers: {},
+      guest: isGuest(left.user),
       snapshot: {
         roomId,
         tick: 0,
