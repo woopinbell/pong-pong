@@ -3,6 +3,7 @@ import {
   apiErrorBodySchema,
   chatBodySchema,
   devLoginBodySchema,
+  guestAuthResponseSchema,
   idParamsSchema,
   profileUpdateBodySchema,
   sessionUserSchema,
@@ -77,6 +78,17 @@ describe("HTTP contracts", () => {
 
     expect(wsTicketResponseSchema.parse(response)).toEqual(response);
     expect(wsTicketResponseSchema.safeParse({ ...response, protocolVersion: 2 }).success).toBe(false);
+  });
+
+  it("keeps the guest session lifetime explicit", () => {
+    const response = {
+      user: { ...user, handle: "guest-018f4af4", displayName: "게스트 7050", online: true },
+      guest: true,
+      expiresInSeconds: 7_200
+    } as const;
+
+    expect(guestAuthResponseSchema.parse(response)).toEqual(response);
+    expect(guestAuthResponseSchema.safeParse({ ...response, expiresInSeconds: 3_600 }).success).toBe(false);
   });
 
   it("accepts only a one-time ticket and protocol v1 in websocket query parameters", () => {
