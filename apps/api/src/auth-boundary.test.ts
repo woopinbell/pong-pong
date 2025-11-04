@@ -110,6 +110,20 @@ describe("authentication boundary", () => {
 });
 
 describe("dev-login availability", () => {
+  it("rejects a demo runtime whose guest session secret is shorter than 32 bytes", async () => {
+    const repo = createMemoryRepository();
+    try {
+      expect(() => buildApp({
+        repo,
+        webOrigin: "http://localhost:3000",
+        appMode: "demo",
+        sessionSecret: "too-short"
+      })).toThrow("Guest session secret must be at least 32 bytes");
+    } finally {
+      await repo.close();
+    }
+  });
+
   it.each([
     { appMode: "production" as const },
     { appMode: "demo" as const }
