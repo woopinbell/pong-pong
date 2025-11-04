@@ -87,6 +87,73 @@ describe("guest demo HTTP boundary", () => {
     expectApiError(limited, 429, "guest_creation_rate_limited");
   });
 
+  it("applies guest creation limits to the forwarded client IP behind the trusted proxy", async () => {
+    const proxied = buildApp({
+      repo,
+      webOrigin: "http://localhost:3000",
+      appMode: "demo",
+      trustProxy: true,
+      guestAccess: new GuestAccess({
+        secret: "guest-demo-test-secret-that-is-long-enough",
+        creationLimitPerMinute: 1
+      })
+    });
+    await proxied.ready();
+    try {
+      const first = await proxied.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.41" }
+      });
+      const otherClient = await proxied.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.42" }
+      });
+      const repeated = await proxied.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.41" }
+      });
+
+      expect(first.statusCode).toBe(200);
+      expect(otherClient.statusCode).toBe(200);
+      expectApiError(repeated, 429, "guest_creation_rate_limited");
+    } finally {
+      await proxied.close();
+    }
+  });
+
+  it("ignores forwarded client addresses when no trusted proxy is configured", async () => {
+    const direct = buildApp({
+      repo,
+      webOrigin: "http://localhost:3000",
+      appMode: "demo",
+      guestAccess: new GuestAccess({
+        secret: "guest-demo-test-secret-that-is-long-enough",
+        creationLimitPerMinute: 1
+      })
+    });
+    await direct.ready();
+    try {
+      const first = await direct.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.51" }
+      });
+      const spoofed = await direct.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.52" }
+      });
+
+      expect(first.statusCode).toBe(200);
+      expectApiError(spoofed, 429, "guest_creation_rate_limited");
+    } finally {
+      await direct.close();
+    }
+  });
+
   it("does not expose guest login outside demo mode", async () => {
     const developmentApp = buildApp({ repo, webOrigin: "http://localhost:3000", appMode: "test" });
     await developmentApp.ready();
@@ -120,6 +187,36 @@ describe("guest demo HTTP boundary", () => {
     expect(updateProfile).not.toHaveBeenCalled();
     expect(listFriends).not.toHaveBeenCalled();
     expect(createTournament).not.toHaveBeenCalled();
+  });
+
+  it("does not expose registered data through public demo reads", async () => {
+    const listChat = vi.spyOn(repo, "listLobbyChat");
+    const listMatches = vi.spyOn(repo, "listRecentMatches");
+    const listLeaderboard = vi.spyOn(repo, "listLeaderboard");
+    const getProfile = vi.spyOn(repo, "getUserByHandle");
+    const listTournaments = vi.spyOn(repo, "listTournaments");
+
+    const lobby = await app.inject({ method: "GET", url: "/lobby" });
+    expect(lobby.statusCode).toBe(200);
+    expect(lobby.json()).toMatchObject({
+      me: null,
+      onlinePlayers: [],
+      recentMatches: [],
+      chat: []
+    });
+
+    const hidden = await Promise.all([
+      app.inject({ method: "GET", url: "/leaderboard" }),
+      app.inject({ method: "GET", url: "/profile/registered-user" }),
+      app.inject({ method: "GET", url: "/tournaments" })
+    ]);
+    for (const response of hidden) expectApiError(response, 404, "not_found");
+
+    expect(listChat).not.toHaveBeenCalled();
+    expect(listMatches).not.toHaveBeenCalled();
+    expect(listLeaderboard).not.toHaveBeenCalled();
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(listTournaments).not.toHaveBeenCalled();
   });
 
   it("issues a one-time websocket ticket from the guest cookie without database storage", async () => {
