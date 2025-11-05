@@ -5,6 +5,7 @@ import {
   chatResponseSchema,
   dashboardSummarySchema,
   friendResponseSchema,
+  guestAuthResponseSchema,
   leaderboardResponseSchema,
   lobbyResponseSchema,
   profileResponseSchema,
@@ -18,6 +19,7 @@ import {
   type ChatMessage,
   type DashboardSummary,
   type FriendSummary,
+  type GuestAuthResponse,
   type LeaderboardEntry,
   type LobbyResponse,
   type MatchSummary,
@@ -84,6 +86,13 @@ export async function devLogin(
     signal
   });
   return result.user;
+}
+
+export async function guestLogin(signal?: AbortSignal): Promise<GuestAuthResponse> {
+  return apiFetch("/auth/guest", guestAuthResponseSchema, {
+    method: "POST",
+    signal
+  });
 }
 
 export async function getMe(signal?: AbortSignal): Promise<SessionUser | null> {
