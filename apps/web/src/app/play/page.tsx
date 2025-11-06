@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, MessageCircle, Pause, Play, Send, Signal, Users } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { demoLobbyPresentation, isDemoMode } from "@/lib/demoPolicy";
 import { PongCanvas } from "@/components/PongCanvas";
 import { directionForKey, isEditableTarget } from "@/game/gameInput";
 import { useGameConnection } from "@/game/useGameConnection";
 
 export default function PlayPage() {
+  const demoMode = isDemoMode();
   const {
     state,
     connectQueue,
@@ -199,7 +201,7 @@ export default function PlayPage() {
             <p className="mt-4 text-2xl font-black text-ink">{opponentName}</p>
             <p className="mt-2 text-sm font-semibold text-muted">{opponent?.ai ? "AI 상대입니다. 서버 경기 장면 기준으로 상태가 갱신됩니다." : "서버 경기 장면 기준으로 상태가 갱신됩니다."}</p>
           </div>
-          <div className="card p-5">
+          {!demoMode || demoLobbyPresentation.showMatchChat ? <div className="card p-5">
             <h2 className="flex items-center gap-2 text-lg font-black text-ink">
               <MessageCircle size={20} /> 매치 채팅
             </h2>
@@ -225,7 +227,7 @@ export default function PlayPage() {
                 <Send size={18} />
               </button>
             </form>
-          </div>
+          </div> : null}
         </aside>
       </div>
     </AppShell>
