@@ -14,6 +14,7 @@ import {
   getMe,
   getProfile,
   getTournaments,
+  guestLogin,
   joinTournament,
   requestFriend,
   requestWsTicket,
@@ -198,6 +199,18 @@ describe("API endpoint helpers", () => {
     expect(new Headers(init.headers).has("authorization")).toBe(false);
   });
 
+  it("starts a server-named guest session without profile input", async () => {
+    const response = { user: sessionUser, guest: true, expiresInSeconds: 7_200 } as const;
+    fetchMock.mockResolvedValue(jsonResponse(response));
+
+    await expect(guestLogin()).resolves.toEqual(response);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:4000/auth/guest");
+    expect(init).toMatchObject({ method: "POST", credentials: "include" });
+    expect(init.body).toBeUndefined();
+  });
+
   it("always requests the current cookie session", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ user: sessionUser }));
 
@@ -269,6 +282,7 @@ describe("API endpoint helpers", () => {
 
   it.each([
     { name: "devLogin", call: () => devLogin("tester", "테스터") },
+    { name: "guestLogin", call: () => guestLogin() },
     { name: "getMe", call: () => getMe() },
     { name: "getLobby", call: () => getLobby() },
     { name: "sendLobbyChat", call: () => sendLobbyChat("안녕하세요") },
