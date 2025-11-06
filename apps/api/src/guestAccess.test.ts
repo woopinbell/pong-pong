@@ -63,6 +63,31 @@ describe("GuestAccess", () => {
     expect(access.consumeWsTicket(hashWsTicket(expired))).toBeNull();
   });
 
+  it("keeps one outstanding ticket per guest and bounds the process ticket store", () => {
+    let nowMs = 3_000_000;
+    const access = createAccess({ clock: () => nowMs, ticketLimit: 2 });
+    const firstGuest = access.createSession("203.0.113.31").user;
+    const secondGuest = access.createSession("203.0.113.32").user;
+    const thirdGuest = access.createSession("203.0.113.33").user;
+
+    const replaced = access.issueWsTicket(firstGuest);
+    const replacement = access.issueWsTicket(firstGuest);
+    expect(access.activeTicketCount).toBe(1);
+    expect(access.consumeWsTicket(hashWsTicket(replaced))).toBeNull();
+
+    access.issueWsTicket(firstGuest);
+    access.issueWsTicket(secondGuest);
+    expect(access.activeTicketCount).toBe(2);
+    expect(() => access.issueWsTicket(thirdGuest)).toThrowError(
+      expect.objectContaining<Partial<GuestAccessError>>({ code: "guest_ticket_limit_reached" })
+    );
+
+    nowMs += 30_000;
+    expect(access.issueWsTicket(thirdGuest)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(access.activeTicketCount).toBe(1);
+    expect(access.consumeWsTicket(hashWsTicket(replacement))).toBeNull();
+  });
+
   it("limits guest sockets per IP and across the process", () => {
     expect(DEFAULT_GUEST_CONNECTIONS_PER_IP).toBe(4);
     expect(DEFAULT_GUEST_CONNECTION_LIMIT).toBe(200);
@@ -101,6 +126,23 @@ describe("GuestAccess", () => {
     expect(access.activeConnectionCount).toBe(1);
     replacement?.release();
     expect(access.activeConnectionCount).toBe(0);
+  });
+
+  it("does not move a replacement connection into an IP that is already full", () => {
+    const access = createAccess({ connectionsPerIp: 1, connectionLimit: 3 });
+    const first = access.createSession("192.0.2.20").user;
+    const second = access.createSession("192.0.2.21").user;
+    const firstLease = access.acquireConnection("192.0.2.20", first.id);
+    const secondLease = access.acquireConnection("192.0.2.21", second.id);
+
+    expect(firstLease).not.toBeNull();
+    expect(secondLease).not.toBeNull();
+    expect(access.acquireConnection("192.0.2.20", second.id)).toBeNull();
+    expect(access.activeConnectionCount).toBe(2);
+
+    firstLease?.release();
+    expect(access.acquireConnection("192.0.2.20", second.id)).not.toBeNull();
+    secondLease?.release();
   });
 });
 

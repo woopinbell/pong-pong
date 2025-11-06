@@ -22,4 +22,20 @@ describe("readEnv", () => {
     expect(env.databaseUrl).toBeNull();
     expect(env.webOrigin).toBe("http://localhost:3000");
   });
+
+  it("requires an explicit strong session secret in demo and production modes", () => {
+    expect(() => readEnv({ APP_MODE: "demo" })).toThrow("SESSION_SECRET");
+    expect(() => readEnv({ NODE_ENV: "production" })).toThrow("SESSION_SECRET");
+    expect(() => readEnv({ APP_MODE: "demo", SESSION_SECRET: "too-short" })).toThrow("SESSION_SECRET");
+
+    expect(readEnv({
+      APP_MODE: "demo",
+      SESSION_SECRET: "0123456789abcdef0123456789abcdef"
+    })).toMatchObject({ appMode: "demo", trustProxy: false });
+  });
+
+  it("enables proxy address parsing only when explicitly configured", () => {
+    expect(readEnv({ TRUST_PROXY: "1" }).trustProxy).toBe(true);
+    expect(readEnv({ TRUST_PROXY: "0" }).trustProxy).toBe(false);
+  });
 });

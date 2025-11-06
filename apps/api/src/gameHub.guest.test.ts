@@ -117,6 +117,7 @@ describe("GameHub guest isolation", () => {
         ratingDelta: 0
       }
     });
+    expect(hub.retainedGuestResultCount).toBe(2);
 
     const recovered = connect(hub, leftUser);
     await flushEvents();
@@ -124,6 +125,7 @@ describe("GameHub guest isolation", () => {
     recovered.terminate();
 
     await vi.advanceTimersByTimeAsync(120_001);
+    expect(hub.retainedGuestResultCount).toBe(0);
     const expired = connect(hub, leftUser);
     await flushEvents();
     expect(expired.latest("game.finished")).toBeUndefined();
