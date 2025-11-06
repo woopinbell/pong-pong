@@ -4,21 +4,24 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, Gamepad2, Home, Shield, Trophy, UserRound, Users } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { createNavigation, isDemoMode, type NavigationId } from "@/lib/demoPolicy";
 import { meQueryOptions } from "@/lib/query";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data: me = null } = useQuery(meQueryOptions());
   const profileHref = me ? `/profile/${me.handle}` : "/";
-  const nav = [
-    { id: "lobby", href: "/", label: "로비", icon: Home },
-    { id: "play", href: "/play", label: "경기", icon: Gamepad2 },
-    { id: "dashboard", href: "/dashboard", label: "대시보드", icon: BarChart3 },
-    { id: "leaderboard", href: "/leaderboard", label: "순위표", icon: Trophy },
-    { id: "tournaments", href: "/tournaments", label: "토너먼트", icon: Users },
-    { id: "profile", href: profileHref, label: "프로필", icon: UserRound, matchPrefix: "/profile" },
-    { id: "admin", href: "/admin", label: "관리", icon: Shield }
-  ];
+  const nav = createNavigation(isDemoMode(), profileHref);
+  const icons: Record<NavigationId, LucideIcon> = {
+    lobby: Home,
+    play: Gamepad2,
+    dashboard: BarChart3,
+    leaderboard: Trophy,
+    tournaments: Users,
+    profile: UserRound,
+    admin: Shield
+  };
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
@@ -35,7 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="grid gap-2">
             {nav.map((item) => {
-              const Icon = item.icon;
+              const Icon = icons[item.id];
               const active = pathname === item.href || Boolean(item.matchPrefix && pathname.startsWith(item.matchPrefix)) || (item.href !== "/" && pathname.startsWith(item.href));
               const className = `focus-ring flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-bold transition ${
                 active ? "bg-blue-50 text-blue-700" : "text-muted hover:bg-slate-50 hover:text-ink"
