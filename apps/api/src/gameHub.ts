@@ -14,13 +14,14 @@ import {
   type SessionUser,
   WINNING_SCORE
 } from "@pong-pong/shared";
-import { DEFAULT_TIMESTEP_MS, FixedStepScheduler } from "./game/fixedStepScheduler";
+import { DEFAULT_TIMESTEP_MS } from "./game/fixedStepScheduler";
 import { ConnectionHeartbeat } from "./game/heartbeat";
 import { InputGate } from "./game/inputGate";
 import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestSnapshotBuffer";
 import { PongAi } from "./game/pongAi";
 import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
 import { RoomSession } from "./game/roomSession";
+import { SharedRoomScheduler } from "./game/sharedRoomScheduler.js";
 import type { GuestSessionUser } from "./guestAccess.js";
 
 type ConnectedUser = SessionUser | GuestSessionUser;
@@ -52,7 +53,6 @@ type Room = {
   ai: boolean;
   ready: Partial<Record<PlayerSide, boolean>>;
   snapshot: GameSnapshot;
-  scheduler: FixedStepScheduler | null;
   mode: MatchMode;
   tournamentMatchId: string | null;
   npcUser: PublicUser | null;
@@ -79,6 +79,7 @@ export class GameHub {
   private readonly tournamentWaiters = new Map<string, Client[]>();
   private readonly waitSamples: number[] = [];
   private readonly inputGate = new InputGate();
+  private readonly roomScheduler = new SharedRoomScheduler();
   private readonly recentGuestResults = new Map<string, {
     result: GameFinished;
     expiresAtMs: number;
@@ -89,6 +90,10 @@ export class GameHub {
 
   get retainedGuestResultCount(): number {
     return this.recentGuestResults.size;
+  }
+
+  get scheduledRoomCount(): number {
+    return this.roomScheduler.activeRooms;
   }
 
   connect(socket: WebSocket, _request: IncomingMessage, user: ConnectedUser, pendingPayloads: string[] = []): void {
@@ -244,7 +249,7 @@ export class GameHub {
     if (room.finishing || room.session.state === "finished") return;
     room.session.disconnect(side, Date.now());
     room.disconnectedUsers[side] = userId;
-    room.scheduler?.stop();
+    this.roomScheduler.unregister(room.id);
     room.snapshot.state.paddles[side].dy = 0;
     room.snapshot.state.phase = "paused";
     this.armReconnectTimer(room);
@@ -282,7 +287,7 @@ export class GameHub {
   }
 
   private abandonRoom(room: Room): void {
-    room.scheduler?.stop();
+    this.roomScheduler.unregister(room.id);
     this.clearReconnectTimer(room);
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
@@ -477,7 +482,6 @@ export class GameHub {
       clients: { left, ...(right ? { right } : {}) },
       ai: options.ai,
       ready: {},
-      scheduler: null,
       mode: options.mode,
       tournamentMatchId: options.tournamentMatchId ?? null,
       npcUser,
@@ -573,7 +577,7 @@ export class GameHub {
   private pauseRoom(client: Client, roomId: string): void {
     const room = this.rooms.get(roomId);
     if (!room || room.snapshot.state.phase !== "playing" || !sideFor(room, client)) return;
-    room.scheduler?.stop();
+    this.roomScheduler.unregister(room.id);
     const sessionState = room.session.pause();
     if (sessionState !== "paused") return;
     room.snapshot.state.phase = sessionState;
@@ -591,12 +595,7 @@ export class GameHub {
   }
 
   private startRoomScheduler(room: Room): void {
-    room.scheduler ??= new FixedStepScheduler(() => this.tick(room), {
-      timestepMs: SIMULATION_TIMESTEP_MS,
-      maxTicksPerLoop: 5,
-      maxAccumulatedMs: 250
-    });
-    room.scheduler.start();
+    this.roomScheduler.register(room.id, () => this.tick(room));
   }
 
   private tick(room: Room): void {
@@ -627,7 +626,7 @@ export class GameHub {
   }
 
   private async finalizeRoom(room: Room, winnerSide: PlayerSide): Promise<void> {
-    room.scheduler?.stop();
+    this.roomScheduler.unregister(room.id);
     this.clearReconnectTimer(room);
     room.disconnectedUsers = {};
     room.session.finish();
@@ -708,6 +707,7 @@ export class GameHub {
   }
 
   private removeFinishedRoom(room: Room): void {
+    this.roomScheduler.unregister(room.id);
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
     }
