@@ -14,13 +14,13 @@ import {
   type SessionUser,
   WINNING_SCORE
 } from "@pong-pong/shared";
-import { DEFAULT_TIMESTEP_MS } from "./game/fixedStepScheduler";
-import { ConnectionHeartbeat } from "./game/heartbeat";
-import { InputGate } from "./game/inputGate";
-import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestSnapshotBuffer";
-import { PongAi } from "./game/pongAi";
-import { PongSimulation, type PongSimulationState } from "./game/pongSimulation";
-import { RoomSession } from "./game/roomSession";
+import { DEFAULT_TIMESTEP_MS } from "./game/fixedStepScheduler.js";
+import { ConnectionHeartbeat } from "./game/heartbeat.js";
+import { InputGate } from "./game/inputGate.js";
+import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestSnapshotBuffer.js";
+import { PongAi } from "./game/pongAi.js";
+import { PongSimulation, type PongSimulationState } from "./game/pongSimulation.js";
+import { RoomSession } from "./game/roomSession.js";
 import { SharedRoomScheduler } from "./game/sharedRoomScheduler.js";
 import type { GuestSessionUser } from "./guestAccess.js";
 

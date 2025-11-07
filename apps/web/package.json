@@ -4,10 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter @pong-pong/shared build",
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "prebuild": "pnpm --filter @pong-pong/shared build",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
+    "pretypecheck": "pnpm --filter @pong-pong/shared build",
     "typecheck": "tsc --noEmit",
+    "pretest": "pnpm --filter @pong-pong/shared build",
     "test": "vitest run"
   },
   "dependencies": {

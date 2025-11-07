@@ -1,5 +1,5 @@
 import { BALL_RADIUS, GAME_HEIGHT, GAME_WIDTH, PADDLE_HEIGHT } from "@pong-pong/shared";
-import type { PaddleDirection, PongSimulationState } from "./pongSimulation";
+import type { PaddleDirection, PongSimulationState } from "./pongSimulation.js";
 
 interface AiProfile {
   reactionTicks: number;
