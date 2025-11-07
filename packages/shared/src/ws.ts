@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { chatMessageSchema } from "./http";
-import { gameFinishedSchema, gameSnapshotSchema, playerSideSchema } from "./game";
+import { chatMessageSchema } from "./http.js";
+import { gameFinishedSchema, gameSnapshotSchema, playerSideSchema } from "./game.js";
 
 const version = { v: z.literal(1) } as const;
 const roomIdSchema = z.string().min(1);
