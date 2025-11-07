@@ -25,7 +25,7 @@ import {
   toTournamentMatchRecord,
   toTournamentMatchSummary,
   toTournamentSummary
-} from "./rowMappers";
+} from "./rowMappers.js";
 import type {
   AdminActionRow,
   ChatMessageRow,
@@ -38,9 +38,9 @@ import type {
   TournamentWithCreatorRow,
   UserProjectionRow,
   UserRow
-} from "./schema";
+} from "./schema.js";
 
-export type { Database } from "./schema";
+export type { Database } from "./schema.js";
 
 type MemoryFriendship = {
   id: string;

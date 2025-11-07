@@ -1,5 +1,5 @@
-import { createMemoryRepository, createPostgresRepository } from "./index";
-import { migrateDatabase } from "./migrator";
+import { createMemoryRepository, createPostgresRepository } from "./index.js";
+import { migrateDatabase } from "./migrator.js";
 
 const command = process.argv[2];
 

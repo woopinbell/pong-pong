@@ -3,15 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json && cp -R migrations dist/",
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/cli.ts migrate",
     "seed:dev": "tsx src/cli.ts seed:dev",
     "seed:demo": "tsx src/cli.ts seed:demo",
+    "migrate:prod": "node dist/cli.js migrate",
     "user:set-role": "tsx src/cli.ts user:set-role",
     "memory-smoke": "tsx src/cli.ts memory-smoke",
     "test": "vitest run --exclude \"**/*.integration.test.ts\"",

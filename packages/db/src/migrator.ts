@@ -10,7 +10,7 @@ import {
   type MigrationProvider
 } from "kysely";
 import { Pool } from "pg";
-import type { Database } from "./schema";
+import type { Database } from "./schema.js";
 
 const migrationsDirectory = fileURLToPath(
   new URL("../migrations", import.meta.url)

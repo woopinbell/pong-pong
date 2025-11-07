@@ -16,7 +16,7 @@ import type {
   TournamentMatchRow,
   TournamentWithCreatorRow,
   UserProjectionRow
-} from "./schema";
+} from "./schema.js";
 
 export interface TournamentMatchRecordView {
   id: string;
