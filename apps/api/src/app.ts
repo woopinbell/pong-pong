@@ -24,6 +24,7 @@ import {
   type GuestSessionUser
 } from "./guestAccess.js";
 import { createLoggerOptions } from "./requestLogging.js";
+import { readAppMode } from "./env.js";
 import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket.js";
 
 const WS_POLICY_VIOLATION = 1008;
@@ -203,7 +204,7 @@ export function buildApp({
     let ticket: string;
     try {
       ticket = isGuestSession(user) && guests
-        ? guests.issueWsTicket(user)
+        ? guests.issueWsTicket(user, request.ip)
         : createRawWsTicket();
     } catch (error) {
       if (error instanceof GuestAccessError) {
@@ -434,13 +435,6 @@ function requireRegistered(user: SessionUser | GuestSessionUser): void {
   if (isGuestSession(user)) {
     throw new ApiHttpError(403, "guest_feature_forbidden", "게스트 계정에서는 사용할 수 없는 기능입니다.");
   }
-}
-
-function readAppMode(input = process.env): AppMode {
-  if (input.APP_MODE === "demo") return "demo";
-  if (input.NODE_ENV === "production") return "production";
-  if (input.NODE_ENV === "test") return "test";
-  return "development";
 }
 
 function useSecureCookies(mode: AppMode): boolean {

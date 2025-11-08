@@ -26,8 +26,13 @@ export function readEnv(input = process.env): ApiEnv {
   };
 }
 
-function readAppMode(input: NodeJS.ProcessEnv): ApiEnv["appMode"] {
-  if (input.APP_MODE === "demo") return "demo";
+export function readAppMode(input: NodeJS.ProcessEnv = process.env): ApiEnv["appMode"] {
+  if (input.APP_MODE !== undefined) {
+    if (["development", "test", "production", "demo"].includes(input.APP_MODE)) {
+      return input.APP_MODE as ApiEnv["appMode"];
+    }
+    throw new Error(`APP_MODE must be development, test, production, or demo: ${input.APP_MODE}`);
+  }
   if (input.NODE_ENV === "production") return "production";
   if (input.NODE_ENV === "test") return "test";
   return "development";

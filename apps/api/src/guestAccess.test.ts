@@ -52,13 +52,13 @@ describe("GuestAccess", () => {
     let nowMs = 2_000_000;
     const access = createAccess({ clock: () => nowMs });
     const guest = access.createSession("203.0.113.30").user;
-    const ticket = access.issueWsTicket(guest);
+    const ticket = access.issueWsTicket(guest, "203.0.113.30");
 
     expect(ticket).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(access.consumeWsTicket(hashWsTicket(ticket))).toEqual(guest);
     expect(access.consumeWsTicket(hashWsTicket(ticket))).toBeNull();
 
-    const expired = access.issueWsTicket(guest);
+    const expired = access.issueWsTicket(guest, "203.0.113.30");
     nowMs += 30_000;
     expect(access.consumeWsTicket(hashWsTicket(expired))).toBeNull();
   });
@@ -70,20 +70,20 @@ describe("GuestAccess", () => {
     const secondGuest = access.createSession("203.0.113.32").user;
     const thirdGuest = access.createSession("203.0.113.33").user;
 
-    const replaced = access.issueWsTicket(firstGuest);
-    const replacement = access.issueWsTicket(firstGuest);
+    const replaced = access.issueWsTicket(firstGuest, "203.0.113.31");
+    const replacement = access.issueWsTicket(firstGuest, "203.0.113.31");
     expect(access.activeTicketCount).toBe(1);
     expect(access.consumeWsTicket(hashWsTicket(replaced))).toBeNull();
 
-    access.issueWsTicket(firstGuest);
-    access.issueWsTicket(secondGuest);
+    access.issueWsTicket(firstGuest, "203.0.113.31");
+    access.issueWsTicket(secondGuest, "203.0.113.32");
     expect(access.activeTicketCount).toBe(2);
-    expect(() => access.issueWsTicket(thirdGuest)).toThrowError(
+    expect(() => access.issueWsTicket(thirdGuest, "203.0.113.33")).toThrowError(
       expect.objectContaining<Partial<GuestAccessError>>({ code: "guest_ticket_limit_reached" })
     );
 
     nowMs += 30_000;
-    expect(access.issueWsTicket(thirdGuest)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(access.issueWsTicket(thirdGuest, "203.0.113.33")).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(access.activeTicketCount).toBe(1);
     expect(access.consumeWsTicket(hashWsTicket(replacement))).toBeNull();
   });
