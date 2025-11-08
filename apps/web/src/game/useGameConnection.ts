@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { ClientEvent, ServerEvent } from "@pong-pong/shared";
 import { requestWsTicket } from "@/lib/api";
 import { GameSocketClient, type GameSocketHandlers, type GameWebSocket } from "./GameSocketClient";
-import { gameConnectionReducer, initialGameConnectionState } from "./gameConnection";
+import { canStartNewMatch, gameConnectionReducer, initialGameConnectionState } from "./gameConnection";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4000/ws";
 
 export function useGameConnection() {
   const [state, dispatch] = useReducer(gameConnectionReducer, initialGameConnectionState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const client = useMemo(() => new GameSocketClient({
     url: WS_URL,
     ticketProvider: requestWsTicket,
@@ -42,11 +44,17 @@ export function useGameConnection() {
   }, []);
 
   const connect = useCallback(async (initialEvent: ClientEvent, openNotice: string) => {
+    if (!canStartNewMatch(stateRef.current)) return;
     const handlers: GameSocketHandlers = {
       onConnecting: () => dispatch({ type: "connectStarted" }),
-      onOpen: () => dispatch({ type: "socketOpened", notice: openNotice }),
+      onOpen: (reconnected) => dispatch(reconnected
+        ? { type: "socketReopened" }
+        : { type: "socketOpened", notice: openNotice }),
       onEvent: handleEvent,
-      onClosed: () => dispatch({ type: "socketClosed" }),
+      onClosed: () => {
+        dispatch({ type: "socketClosed" });
+        return Boolean(stateRef.current.roomId);
+      },
       onFailure: (error) => dispatch({ type: "failed", notice: failureMessage(error) })
     };
     await client.connect(initialEvent, handlers);

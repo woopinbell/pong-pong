@@ -47,3 +47,15 @@ export function isDemoRestrictedPath(pathname: string): boolean {
 export function isDemoMode(): boolean {
   return process.env.NEXT_PUBLIC_APP_MODE === "demo";
 }
+
+export function formatTransientResultNotice(result: {
+  persisted: false;
+  leftScore: number;
+  rightScore: number;
+}): string {
+  return `임시 경기 종료: ${result.leftScore} - ${result.rightScore} · 전적에 저장되지 않았습니다.`;
+}
+
+export function shouldResumeGameFromLobby(event: { type: string }): boolean {
+  return event.type === "queue.matched" || event.type === "game.snapshot";
+}

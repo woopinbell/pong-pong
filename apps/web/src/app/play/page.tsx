@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { demoLobbyPresentation, isDemoMode } from "@/lib/demoPolicy";
 import { PongCanvas } from "@/components/PongCanvas";
 import { directionForKey, isEditableTarget } from "@/game/gameInput";
+import { canStartNewMatch } from "@/game/gameConnection";
 import { useGameConnection } from "@/game/useGameConnection";
 
 export default function PlayPage() {
@@ -37,6 +38,7 @@ export default function PlayPage() {
   const canPause = Boolean(roomId && state.status === "playing");
   const canResume = Boolean(roomId && state.status === "paused");
   const canMove = Boolean(roomId && state.status === "playing");
+  const canStartMatch = canStartNewMatch(state);
   const opponent = snapshot?.state.players.find((player) => player.side === "right");
   const opponentName = state.opponent ?? opponent?.displayName ?? "대기 중";
 
@@ -125,10 +127,10 @@ export default function PlayPage() {
               <p className="mt-2 text-sm font-semibold text-muted">방향키나 W/S 키를 누르거나 화면 조작 버튼으로 패들을 움직입니다.</p>
             </div>
             <div className="flex gap-3">
-              <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white" onClick={() => startQueue("queue")}>
+              <button className="focus-ring rounded-lg bg-blue-600 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" disabled={!canStartMatch} onClick={() => startQueue("queue")}>
                 매칭 큐 참가
               </button>
-              <button className="focus-ring rounded-lg bg-green-600 px-4 py-3 text-sm font-black text-white" onClick={() => startQueue("ai")}>
+              <button className="focus-ring rounded-lg bg-green-600 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:bg-slate-300" disabled={!canStartMatch} onClick={() => startQueue("ai")}>
                 인공지능 연습 시작
               </button>
             </div>

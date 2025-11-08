@@ -34,6 +34,7 @@ export const initialGameConnectionState: GameConnectionState = {
 export type GameConnectionAction =
   | { type: "connectStarted" }
   | { type: "socketOpened"; notice: string }
+  | { type: "socketReopened" }
   | { type: "matched"; roomId: string; opponent: string }
   | { type: "snapshotReceived"; snapshot: GameSnapshot }
   | { type: "gameFinished"; result: { leftScore: number; rightScore: number } }
@@ -55,6 +56,8 @@ export function gameConnectionReducer(
       };
     case "socketOpened":
       return { ...state, status: "matching", notice: action.notice };
+    case "socketReopened":
+      return { ...state, status: "reconnecting", notice: "경기 상태 복구 중" };
     case "matched":
       return {
         ...state,
@@ -96,6 +99,10 @@ export function gameConnectionReducer(
     case "failed":
       return { ...state, status: "failed", notice: action.notice ?? "연결을 확인해 주세요." };
   }
+}
+
+export function canStartNewMatch(state: GameConnectionState): boolean {
+  return state.roomId === null && ["idle", "finished", "failed"].includes(state.status);
 }
 
 function statusForSnapshot(snapshot: GameSnapshot): GameConnectionStatus {

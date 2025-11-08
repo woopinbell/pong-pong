@@ -17,9 +17,9 @@ export interface GameWebSocket {
 
 export interface GameSocketHandlers {
   onConnecting(): void;
-  onOpen(): void;
+  onOpen(reconnected: boolean): void;
   onEvent(event: ServerEvent): void;
-  onClosed(): void;
+  onClosed(): boolean | void;
   onFailure(error: unknown): void;
 }
 
@@ -31,26 +31,42 @@ type GameSocketClientOptions = {
 
 const CONNECTING = 0;
 const OPEN = 1;
+const RECONNECT_WINDOW_MS = 15_000;
+const INITIAL_RECONNECT_DELAY_MS = 250;
+const MAX_RECONNECT_DELAY_MS = 2_000;
 
 export class GameSocketClient {
   private socket: GameWebSocket | null = null;
   private ticketRequest: AbortController | null = null;
   private generation = 0;
   private inputSequence = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDeadlineMs = 0;
+  private reconnectAttempts = 0;
 
   constructor(private readonly options: GameSocketClientOptions) {}
 
   async connect(initialEvent: ClientEvent, handlers: GameSocketHandlers): Promise<void> {
     const generation = this.replaceConnection();
+    handlers.onConnecting();
+    await this.openSocket(generation, initialEvent, handlers, false);
+  }
+
+  private async openSocket(
+    generation: number,
+    initialEvent: ClientEvent | null,
+    handlers: GameSocketHandlers,
+    reconnected: boolean
+  ): Promise<void> {
     const controller = new AbortController();
     this.ticketRequest = controller;
-    handlers.onConnecting();
 
     let ticket: WsTicketResponse;
     try {
       ticket = await this.options.ticketProvider(controller.signal);
     } catch (error) {
       if (controller.signal.aborted || generation !== this.generation || isAbortError(error)) return;
+      if (reconnected && this.scheduleReconnect(generation, handlers)) return;
       handlers.onFailure(error);
       return;
     } finally {
@@ -68,8 +84,10 @@ export class GameSocketClient {
 
     socket.onopen = () => {
       if (!this.isCurrent(socket, generation)) return;
-      handlers.onOpen();
-      socket.send(JSON.stringify(initialEvent));
+      this.reconnectAttempts = 0;
+      this.reconnectDeadlineMs = 0;
+      handlers.onOpen(reconnected);
+      if (initialEvent) socket.send(JSON.stringify(initialEvent));
     };
     socket.onmessage = (event) => {
       if (!this.isCurrent(socket, generation)) return;
@@ -81,12 +99,12 @@ export class GameSocketClient {
       }
     };
     socket.onerror = () => {
-      if (this.isCurrent(socket, generation)) handlers.onFailure(new Error("실시간 연결에서 오류가 발생했습니다."));
+      if (this.isCurrent(socket, generation)) socket.close();
     };
     socket.onclose = () => {
       if (!this.isCurrent(socket, generation)) return;
       this.socket = null;
-      handlers.onClosed();
+      if (handlers.onClosed() === true) this.scheduleReconnect(generation, handlers);
     };
   }
 
@@ -117,6 +135,10 @@ export class GameSocketClient {
     this.generation += 1;
     this.ticketRequest?.abort();
     this.ticketRequest = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectDeadlineMs = 0;
+    this.reconnectAttempts = 0;
 
     const socket = this.socket;
     this.socket = null;
@@ -133,6 +155,28 @@ export class GameSocketClient {
 
   private isCurrent(socket: GameWebSocket, generation: number): boolean {
     return this.socket === socket && this.generation === generation;
+  }
+
+  private scheduleReconnect(generation: number, handlers: GameSocketHandlers): boolean {
+    if (generation !== this.generation) return false;
+    if (this.reconnectTimer) return true;
+    const nowMs = Date.now();
+    if (this.reconnectDeadlineMs === 0) this.reconnectDeadlineMs = nowMs + RECONNECT_WINDOW_MS;
+    if (nowMs >= this.reconnectDeadlineMs) {
+      handlers.onFailure(new Error("경기 재연결 제한 시간을 초과했습니다."));
+      return true;
+    }
+    const delayMs = Math.min(
+      INITIAL_RECONNECT_DELAY_MS * (2 ** this.reconnectAttempts),
+      MAX_RECONNECT_DELAY_MS,
+      this.reconnectDeadlineMs - nowMs
+    );
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.openSocket(generation, null, handlers, true);
+    }, delayMs);
+    return true;
   }
 }
 

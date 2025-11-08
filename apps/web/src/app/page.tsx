@@ -9,7 +9,12 @@ import { LoginPanel } from "@/components/LoginPanel";
 import { PongCanvas } from "@/components/PongCanvas";
 import { StatCard } from "@/components/StatCard";
 import { requestWsTicket, sendLobbyChat } from "@/lib/api";
-import { demoLobbyPresentation, isDemoMode } from "@/lib/demoPolicy";
+import {
+  demoLobbyPresentation,
+  formatTransientResultNotice,
+  isDemoMode,
+  shouldResumeGameFromLobby
+} from "@/lib/demoPolicy";
 import {
   invalidateExactQueries,
   lobbyQueryOptions,
@@ -58,6 +63,14 @@ export default function HomePage() {
         socketRef.current = socket;
         socket.onmessage = (event) => {
           const message = parseServerEvent(event.data);
+          if (demoMode && shouldResumeGameFromLobby(message)) {
+            window.location.assign("/play");
+            return;
+          }
+          if (message.type === "game.finished" && !message.result.persisted) {
+            setNotice(formatTransientResultNotice(message.result));
+            return;
+          }
           if (message.type === "chat.message" && message.message.scope === "lobby") {
             queryClient.setQueryData<LobbyResponse>(queryKeys.lobby(), (current) => current ? {
               ...current,
@@ -87,7 +100,7 @@ export default function HomePage() {
       if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
       if (socketRef.current === socket) socketRef.current = null;
     };
-  }, [queryClient, userId]);
+  }, [demoMode, queryClient, userId]);
 
   async function submitLobbyChat(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -136,6 +149,11 @@ export default function HomePage() {
               ? demoLobbyPresentation.description
               : "빠른 매칭으로 상대를 찾거나 인공지능을 상대로 손을 풀어 보세요. 경기가 끝나면 전적과 순위가 바로 갱신됩니다."}
           </p>
+          {notice ? (
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm font-bold text-amber-700" role="status">
+              {notice}
+            </p>
+          ) : null}
           <div className="mt-5 flex flex-wrap gap-3">
             <a className="focus-ring rounded-lg bg-blue-600 px-5 py-3 text-sm font-black text-white" href="/play">
               빠른 매칭
