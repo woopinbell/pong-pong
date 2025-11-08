@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WsTicketResponse } from "@pong-pong/shared";
 import {
   GameSocketClient,
@@ -13,6 +13,8 @@ const ticket = {
 } satisfies WsTicketResponse;
 
 describe("GameSocketClient", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("cancels an unused one-time ticket request before starting another connection", async () => {
     const signals: AbortSignal[] = [];
     const ticketProvider = vi.fn((signal?: AbortSignal) => new Promise<WsTicketResponse>((resolve, reject) => {
@@ -94,6 +96,39 @@ describe("GameSocketClient", () => {
       { v: 1, type: "game.input", roomId: "room-1", inputSeq: 2, direction: 0 },
       { v: 1, type: "game.input", roomId: "room-1", inputSeq: 3, direction: 1 }
     ]);
+  });
+
+  it("uses a fresh ticket to reconnect without sending the original queue command again", async () => {
+    vi.useFakeTimers();
+    const sockets: FakeSocket[] = [];
+    const ticketProvider = vi.fn(async () => ticket);
+    const onClosed = vi.fn(() => true);
+    const client = new GameSocketClient({
+      url: "ws://localhost:4000/ws",
+      ticketProvider,
+      socketFactory: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      }
+    });
+
+    await client.connect(
+      { v: 1, type: "queue.join", mode: "queue" },
+      handlers({ onClosed })
+    );
+    sockets[0].open();
+    expect(sockets[0].sent).toHaveLength(1);
+
+    sockets[0].close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(onClosed).toHaveBeenCalledOnce();
+    expect(ticketProvider).toHaveBeenCalledTimes(2);
+    expect(sockets).toHaveLength(2);
+
+    sockets[1].open();
+    expect(sockets[1].sent).toEqual([]);
+    client.close();
   });
 });
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   createNavigation,
   demoLobbyPresentation,
+  formatTransientResultNotice,
+  shouldResumeGameFromLobby,
   isDemoRestrictedPath
 } from "./demoPolicy";
 
@@ -44,5 +46,19 @@ describe("guest demo presentation policy", () => {
     }
     expect(isDemoRestrictedPath("/")).toBe(false);
     expect(isDemoRestrictedPath("/play")).toBe(false);
+  });
+
+  it("labels recovered guest results as transient", () => {
+    expect(formatTransientResultNotice({
+      persisted: false,
+      leftScore: 1,
+      rightScore: 3
+    })).toBe("임시 경기 종료: 1 - 3 · 전적에 저장되지 않았습니다.");
+  });
+
+  it("moves an accidentally recovered room back to the game screen", () => {
+    expect(shouldResumeGameFromLobby({ type: "queue.matched" })).toBe(true);
+    expect(shouldResumeGameFromLobby({ type: "game.snapshot" })).toBe(true);
+    expect(shouldResumeGameFromLobby({ type: "game.finished" })).toBe(false);
   });
 });

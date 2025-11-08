@@ -38,4 +38,15 @@ describe("readEnv", () => {
     expect(readEnv({ TRUST_PROXY: "1" }).trustProxy).toBe(true);
     expect(readEnv({ TRUST_PROXY: "0" }).trustProxy).toBe(false);
   });
+
+  it("honors an explicit production app mode without relying on NODE_ENV", () => {
+    const env = readEnv({
+      APP_MODE: "production",
+      SESSION_SECRET: "0123456789abcdef0123456789abcdef"
+    });
+
+    expect(env.appMode).toBe("production");
+    expect(readEnv({ APP_MODE: "test" }).appMode).toBe("test");
+    expect(() => readEnv({ APP_MODE: "staging" })).toThrow("APP_MODE");
+  });
 });

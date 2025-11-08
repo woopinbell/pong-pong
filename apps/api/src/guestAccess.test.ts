@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashWsTicket } from "./wsTicket.js";
 import {
   DEFAULT_GUEST_CONNECTION_LIMIT,
@@ -10,6 +10,8 @@ import {
 } from "./guestAccess.js";
 
 describe("GuestAccess", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("authenticates an HMAC-signed session for two hours and rejects tampering", () => {
     let nowMs = Date.parse("2026-01-01T00:00:00.000Z");
     const access = createAccess({ clock: () => nowMs });
@@ -46,6 +48,33 @@ describe("GuestAccess", () => {
 
     nowMs += 60_000;
     expect(access.createSession("203.0.113.20").user.sessionKind).toBe("guest");
+  });
+
+  it("removes expired creation windows for inactive IP addresses", () => {
+    let nowMs = 1_500_000;
+    const access = createAccess({ clock: () => nowMs });
+    access.createSession("203.0.113.21");
+    access.createSession("203.0.113.22");
+    expect(access.trackedCreationIpCount).toBe(2);
+
+    nowMs += 60_000;
+    access.createSession("203.0.113.23");
+    expect(access.trackedCreationIpCount).toBe(1);
+  });
+
+  it("cleans inactive IP windows on time and bounds the tracked IP store", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const access = createAccess({ trackedIpLimit: 2 });
+    access.createSession("203.0.113.24");
+    access.createSession("203.0.113.25");
+    expect(() => access.createSession("203.0.113.26")).toThrowError(
+      expect.objectContaining<Partial<GuestAccessError>>({ code: "guest_creation_capacity_reached" })
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(access.trackedCreationIpCount).toBe(0);
+    expect(access.createSession("203.0.113.26").user.sessionKind).toBe("guest");
   });
 
   it("stores only a one-time hash for 30-second websocket tickets", () => {
@@ -86,6 +115,30 @@ describe("GuestAccess", () => {
     expect(access.issueWsTicket(thirdGuest, "203.0.113.33")).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(access.activeTicketCount).toBe(1);
     expect(access.consumeWsTicket(hashWsTicket(replacement))).toBeNull();
+  });
+
+  it("cleans tickets on time and limits pending tickets and issuance per IP", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const pending = createAccess({ ticketsPerIp: 1 });
+    const first = pending.createSession("198.51.100.31").user;
+    const second = pending.createSession("198.51.100.31").user;
+    pending.issueWsTicket(first, "198.51.100.31");
+    expect(() => pending.issueWsTicket(second, "198.51.100.31")).toThrowError(
+      expect.objectContaining<Partial<GuestAccessError>>({ code: "guest_ticket_ip_limit_reached" })
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pending.activeTicketCount).toBe(0);
+    expect(pending.issueWsTicket(second, "198.51.100.31")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+    const rate = createAccess({ ticketIssueLimitPerMinute: 2 });
+    const guest = rate.createSession("198.51.100.32").user;
+    rate.issueWsTicket(guest, "198.51.100.32");
+    rate.issueWsTicket(guest, "198.51.100.32");
+    expect(() => rate.issueWsTicket(guest, "198.51.100.32")).toThrowError(
+      expect.objectContaining<Partial<GuestAccessError>>({ code: "guest_ticket_rate_limited" })
+    );
   });
 
   it("limits guest sockets per IP and across the process", () => {

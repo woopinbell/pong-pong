@@ -3,6 +3,7 @@ import type { GameSnapshot } from "@pong-pong/shared";
 import {
   gameConnectionReducer,
   initialGameConnectionState,
+  canStartNewMatch,
   type GameConnectionStatus
 } from "./gameConnection";
 
@@ -104,6 +105,18 @@ describe("gameConnectionReducer", () => {
       lastSnapshotSequence: -1,
       messages: []
     });
+  });
+
+  it("does not start another queue command while a room is reconnecting", () => {
+    expect(canStartNewMatch({
+      ...initialGameConnectionState,
+      status: "reconnecting",
+      roomId: "room-1"
+    })).toBe(false);
+    expect(canStartNewMatch({
+      ...initialGameConnectionState,
+      status: "finished"
+    })).toBe(true);
   });
 });
 
