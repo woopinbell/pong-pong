@@ -191,6 +191,19 @@ export const wsHandshakeQuerySchema = z.object({
 
 export const okResponseSchema = z.object({ ok: z.literal(true) });
 export const healthResponseSchema = z.object({ ok: z.literal(true), service: z.literal("pong-pong-api") });
+export const liveHealthResponseSchema = z.object({
+  status: z.literal("ok"),
+  service: z.literal("pong-pong-api")
+});
+export const readyHealthResponseSchema = z.object({
+  status: z.enum(["ready", "not_ready"]),
+  service: z.literal("pong-pong-api"),
+  checks: z.object({
+    lifecycle: z.enum(["accepting", "draining"]),
+    database: z.enum(["up", "down"]),
+    migrations: z.enum(["current", "pending", "diverged", "not_applicable", "unknown"])
+  }).strict()
+}).strict();
 export const userResponseSchema = z.object({ user: sessionUserSchema });
 export const guestAuthResponseSchema = z.object({
   user: sessionUserSchema,

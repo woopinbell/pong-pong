@@ -144,6 +144,37 @@ export function buildApp({
     service: "pong-pong-api"
   }));
 
+  app.get("/health/live", async () => parseOutput(http.liveHealthResponseSchema, {
+    status: "ok",
+    service: "pong-pong-api"
+  }));
+
+  app.get("/health/ready", async (request, reply) => {
+    try {
+      const repository = await repo.checkReadiness();
+      const ready = repository.database === "up"
+        && (repository.migrations === "current" || repository.migrations === "not_applicable");
+      const body = parseOutput(http.readyHealthResponseSchema, {
+        status: ready ? "ready" : "not_ready",
+        service: "pong-pong-api",
+        checks: {
+          lifecycle: "accepting",
+          database: repository.database,
+          migrations: repository.migrations
+        }
+      });
+      return reply.code(ready ? 200 : 503).send(body);
+    } catch (error) {
+      request.log.warn({ errorName: error instanceof Error ? error.name : "UnknownError" }, "readiness check failed");
+      const body = parseOutput(http.readyHealthResponseSchema, {
+        status: "not_ready",
+        service: "pong-pong-api",
+        checks: { lifecycle: "accepting", database: "down", migrations: "unknown" }
+      });
+      return reply.code(503).send(body);
+    }
+  });
+
   if (appMode === "development" || appMode === "test") {
     app.post("/auth/dev-login", async (request, reply) => {
       const body = parseInput(http.devLoginBodySchema, request.body);
