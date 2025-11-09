@@ -39,6 +39,7 @@ import type {
   UserProjectionRow,
   UserRow
 } from "./schema.js";
+import { inspectMigrationSet } from "./migrator.js";
 
 export type { Database } from "./schema.js";
 
@@ -73,6 +74,11 @@ export interface CreateWsTicketInput {
 }
 
 export type SeedProfile = "development" | "demo";
+
+export interface RepositoryReadiness {
+  database: "up";
+  migrations: "current" | "pending" | "diverged" | "not_applicable";
+}
 
 type NpcSeed = {
   handle: string;
@@ -123,6 +129,7 @@ export interface TournamentMatchRecord {
 
 export interface AppRepository {
   close(): Promise<void>;
+  checkReadiness(): Promise<RepositoryReadiness>;
   ensureSeedData(profile?: SeedProfile): Promise<void>;
   upsertDevUser(input: DevLoginInput): Promise<SessionUser>;
   createSession(userId: string): Promise<string>;
@@ -176,6 +183,15 @@ class PostgresRepository implements AppRepository {
   async close(): Promise<void> {
     await this.db.destroy();
     await this.pool.end().catch(() => undefined);
+  }
+
+  async checkReadiness(): Promise<RepositoryReadiness> {
+    await sql<{ ok: number }>`select 1 as ok`.execute(this.db);
+    const migrationSet = await inspectMigrationSet(this.db);
+    return {
+      database: "up",
+      migrations: migrationSet.status
+    };
   }
 
   async ensureSeedData(profile: SeedProfile = "development"): Promise<void> {
@@ -906,6 +922,10 @@ class MemoryRepository implements AppRepository {
   private readonly adminActions: AdminActionSummary[] = [];
 
   async close(): Promise<void> {}
+
+  async checkReadiness(): Promise<RepositoryReadiness> {
+    return { database: "up", migrations: "not_applicable" };
+  }
 
   async ensureSeedData(profile: SeedProfile = "development"): Promise<void> {
     if (profile === "development") {
