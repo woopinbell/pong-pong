@@ -17,6 +17,10 @@ const REDACT_PATHS = [
   "request.query",
   "query",
   "ticket",
+  "*.cookie",
+  "*.authorization",
+  "*.sessionToken",
+  "*.query",
   "*.ticket"
 ] as const;
 
