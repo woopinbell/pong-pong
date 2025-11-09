@@ -41,6 +41,24 @@ afterAll(async () => {
 });
 
 describe("PostgreSQL integration", () => {
+  it("reports pending migrations before migrate and current migrations afterward", async () => {
+    await withIsolatedDatabase(async ({ databaseUrl, openRepository }) => {
+      const repository = openRepository();
+
+      await expect(repository.checkReadiness()).resolves.toEqual({
+        database: "up",
+        migrations: "pending"
+      });
+
+      await migrateDatabase(databaseUrl);
+
+      await expect(repository.checkReadiness()).resolves.toEqual({
+        database: "up",
+        migrations: "current"
+      });
+    }, { migrate: false });
+  });
+
   it("migrates an empty schema and leaves a repeated migration unchanged", async () => {
     await withIsolatedDatabase(async ({ databaseUrl, openPool, schema }) => {
       const pool = openPool();
