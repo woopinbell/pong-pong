@@ -26,7 +26,7 @@ import {
 import { createLoggerOptions } from "./requestLogging.js";
 import { readAppMode } from "./env.js";
 import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket.js";
-import { ApiMetrics } from "./observability.js";
+import { ApiMetrics, instrumentRepository } from "./observability.js";
 
 const WS_POLICY_VIOLATION = 1008;
 const WS_MESSAGE_TOO_BIG = 1009;
@@ -46,7 +46,7 @@ export interface BuildAppOptions {
 }
 
 export function buildApp({
-  repo,
+  repo: sourceRepo,
   webOrigin,
   appMode = readAppMode(),
   guestAccess,
@@ -57,8 +57,11 @@ export function buildApp({
     logger: createLoggerOptions(process.env.LOG_LEVEL ?? "info"),
     trustProxy
   });
+  let readGameStats = () => ({ onlinePlayers: 0, queuedPlayers: 0, activeRooms: 0 });
+  const metrics = new ApiMetrics(() => readGameStats());
+  const repo = instrumentRepository(sourceRepo, metrics);
   const hub = new GameHub(repo);
-  const metrics = new ApiMetrics(() => hub.liveStats());
+  readGameStats = () => hub.liveStats();
   const guests = appMode === "demo" ? guestAccess ?? new GuestAccess({ secret: sessionSecret }) : null;
   const getCurrentUser = (request: FastifyRequest) => currentUser(repo, request, guests, appMode === "demo");
 
