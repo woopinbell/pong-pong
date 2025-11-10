@@ -60,10 +60,22 @@ export function buildApp({
   let readGameStats = () => ({ onlinePlayers: 0, queuedPlayers: 0, activeRooms: 0 });
   const metrics = new ApiMetrics(() => readGameStats());
   const repo = instrumentRepository(sourceRepo, metrics);
-  const hub = new GameHub(repo);
+  const hub = new GameHub(repo, {
+    roomCreated: (context) => {
+      app.log.info(context, "game room created");
+    },
+    reconnect: (context) => {
+      metrics.recordReconnect(context.outcome);
+      app.log.info(context, "game connection recovery recorded");
+    }
+  });
   readGameStats = () => hub.liveStats();
   const guests = appMode === "demo" ? guestAccess ?? new GuestAccess({ secret: sessionSecret }) : null;
-  const getCurrentUser = (request: FastifyRequest) => currentUser(repo, request, guests, appMode === "demo");
+  const getCurrentUser = async (request: FastifyRequest) => {
+    const user = await currentUser(repo, request, guests, appMode === "demo");
+    if (user) request.log.debug({ userId: user.id }, "request authenticated");
+    return user;
+  };
 
   app.addHook("onResponse", (request, reply, done) => {
     metrics.observeRequest(
@@ -151,7 +163,8 @@ export function buildApp({
           }
           if (lease) socket.once("close", () => lease.release());
           socket.off("message", bufferPayload);
-          hub.connect(socket as WebSocket, request.raw, user, pendingPayloads);
+          request.log.info({ userId: user.id }, "websocket authenticated");
+          hub.connect(socket as WebSocket, request.raw, user, pendingPayloads, String(request.id));
         })
         .catch(() => closeAuthentication(1011, "websocket authentication failed"));
     });

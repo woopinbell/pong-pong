@@ -1,4 +1,5 @@
 import {
+  Counter,
   Gauge,
   Histogram,
   Registry,
@@ -87,6 +88,12 @@ export class ApiMetrics {
     help: "Current game room count",
     registers: [this.registry]
   });
+  private readonly reconnects = new Counter({
+    name: "pong_pong_api_reconnects_total",
+    help: "Websocket room reconnection outcomes",
+    labelNames: ["outcome"] as const,
+    registers: [this.registry]
+  });
 
   constructor(private readonly readGameStats: () => LiveGameStats) {
     collectDefaultMetrics({
@@ -117,6 +124,10 @@ export class ApiMetrics {
       operation: REPOSITORY_OPERATIONS.has(operation) ? operation : "other",
       outcome
     }, Math.max(0, durationMs) / 1_000);
+  }
+
+  recordReconnect(outcome: "success" | "expired"): void {
+    this.reconnects.inc({ outcome });
   }
 
   async scrape(): Promise<string> {

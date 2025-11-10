@@ -33,6 +33,7 @@ type Client = {
   roomId: string | null;
   heartbeat: ConnectionHeartbeat;
   snapshots: LatestSnapshotBuffer;
+  requestId: string | null;
 };
 
 type VersionlessServerEvent = ServerEvent extends infer Event
@@ -71,6 +72,20 @@ const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
 const GUEST_RESULT_RETENTION_MS = 2 * 60 * 1_000;
 
+export interface GameHubObserver {
+  roomCreated?(context: {
+    roomId: string;
+    requestIds: string[];
+    userIds: string[];
+  }): void;
+  reconnect?(context: {
+    outcome: "success" | "expired";
+    roomId: string;
+    requestId?: string;
+    userId?: string;
+  }): void;
+}
+
 export class GameHub {
   private readonly clients = new Map<string, Client>();
   private readonly clientsByUser = new Map<string, Client>();
@@ -86,7 +101,10 @@ export class GameHub {
     cleanupTimer: NodeJS.Timeout;
   }>();
 
-  constructor(private readonly repo: AppRepository) {}
+  constructor(
+    private readonly repo: AppRepository,
+    private readonly observer: GameHubObserver = {}
+  ) {}
 
   get retainedGuestResultCount(): number {
     return this.recentGuestResults.size;
@@ -96,7 +114,13 @@ export class GameHub {
     return this.roomScheduler.activeRooms;
   }
 
-  connect(socket: WebSocket, _request: IncomingMessage, user: ConnectedUser, pendingPayloads: string[] = []): void {
+  connect(
+    socket: WebSocket,
+    _request: IncomingMessage,
+    user: ConnectedUser,
+    pendingPayloads: string[] = [],
+    requestId: string | null = null
+  ): void {
     const heartbeat = new ConnectionHeartbeat({
       ping: () => {
         if (socket.readyState === WebSocket.OPEN) socket.ping();
@@ -109,7 +133,8 @@ export class GameHub {
       user,
       roomId: null,
       heartbeat,
-      snapshots: new LatestSnapshotBuffer(socket)
+      snapshots: new LatestSnapshotBuffer(socket),
+      requestId
     };
     const previous = this.clientsByUser.get(user.id);
     this.clients.set(client.id, client);
@@ -230,6 +255,12 @@ export class GameHub {
         client.roomId = room.id;
         delete room.disconnectedUsers[side];
         this.sendMatchContext(client, room, side);
+        this.observer.reconnect?.({
+          outcome: "success",
+          roomId: room.id,
+          requestId: client.requestId ?? undefined,
+          userId: client.user.id
+        });
 
         if (room.session.state === "reconnecting") {
           this.send(client, { type: "game.snapshot", snapshot: room.snapshot });
@@ -271,6 +302,10 @@ export class GameHub {
     if (!expiry) {
       this.armReconnectTimer(room);
       return;
+    }
+
+    for (const userId of Object.values(room.disconnectedUsers)) {
+      if (userId) this.observer.reconnect?.({ outcome: "expired", roomId, userId });
     }
 
     room.disconnectedUsers = {};
@@ -524,6 +559,12 @@ export class GameHub {
       }
     };
     this.rooms.set(roomId, room);
+    this.observer.roomCreated?.({
+      roomId,
+      requestIds: [left.requestId, right?.requestId]
+        .filter((requestId): requestId is string => Boolean(requestId)),
+      userIds: [left.user.id, ...(right ? [right.user.id] : [])]
+    });
     left.roomId = roomId;
     if (right) right.roomId = roomId;
     this.send(left, { type: "queue.matched", roomId, side: "left", opponent: rightPlayer?.displayName ?? "연습 AI" });
