@@ -88,6 +88,12 @@ export class ApiMetrics {
     help: "Current game room count",
     registers: [this.registry]
   });
+  private readonly matchFinalizations = new Counter({
+    name: "pong_pong_api_match_finalizations_total",
+    help: "Completed match finalization attempts",
+    labelNames: ["persistence", "outcome"] as const,
+    registers: [this.registry]
+  });
   private readonly reconnects = new Counter({
     name: "pong_pong_api_reconnects_total",
     help: "Websocket room reconnection outcomes",
@@ -124,6 +130,10 @@ export class ApiMetrics {
       operation: REPOSITORY_OPERATIONS.has(operation) ? operation : "other",
       outcome
     }, Math.max(0, durationMs) / 1_000);
+  }
+
+  recordFinalization(persistence: "database" | "memory", outcome: "success" | "failure"): void {
+    this.matchFinalizations.inc({ persistence, outcome });
   }
 
   recordReconnect(outcome: "success" | "expired"): void {

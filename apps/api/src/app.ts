@@ -67,6 +67,11 @@ export function buildApp({
     reconnect: (context) => {
       metrics.recordReconnect(context.outcome);
       app.log.info(context, "game connection recovery recorded");
+    },
+    matchFinalized: (context) => {
+      metrics.recordFinalization(context.persistence, context.outcome);
+      const level = context.outcome === "success" ? "info" : "warn";
+      app.log[level](context, "match finalization recorded");
     }
   });
   readGameStats = () => hub.liveStats();

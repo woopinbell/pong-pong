@@ -84,6 +84,13 @@ export interface GameHubObserver {
     requestId?: string;
     userId?: string;
   }): void;
+  matchFinalized?(context: {
+    outcome: "success" | "failure";
+    persistence: "database" | "memory";
+    roomId: string;
+    matchId: string | null;
+    userIds: string[];
+  }): void;
 }
 
 export class GameHub {
@@ -686,24 +693,50 @@ export class GameHub {
         rightScore: room.snapshot.state.rightScore,
         ratingDelta: 0
       };
+      this.observer.matchFinalized?.({
+        outcome: "success",
+        persistence: "memory",
+        roomId: room.id,
+        matchId: null,
+        userIds: roomUserIds(room)
+      });
       this.rememberGuestResult(room, result);
       this.broadcastRoom(room.id, { type: "game.finished", result });
       this.removeFinishedRoom(room);
       return;
     }
-    const finalized = await this.repo.finalizeMatch({
-      resultKey: `room:${room.id}:finished`,
-      mode: room.mode,
-      winnerId: winner?.id ?? null,
-      loserId: loser?.id ?? null,
-      scoreLeft: room.snapshot.state.leftScore,
-      scoreRight: room.snapshot.state.rightScore,
-      ...(room.tournamentMatchId ? {
-        tournament: {
-          tournamentMatchId: room.tournamentMatchId,
-          roomId: room.id
-        }
-      } : {})
+    let finalized: Awaited<ReturnType<AppRepository["finalizeMatch"]>>;
+    try {
+      finalized = await this.repo.finalizeMatch({
+        resultKey: `room:${room.id}:finished`,
+        mode: room.mode,
+        winnerId: winner?.id ?? null,
+        loserId: loser?.id ?? null,
+        scoreLeft: room.snapshot.state.leftScore,
+        scoreRight: room.snapshot.state.rightScore,
+        ...(room.tournamentMatchId ? {
+          tournament: {
+            tournamentMatchId: room.tournamentMatchId,
+            roomId: room.id
+          }
+        } : {})
+      });
+    } catch (error) {
+      this.observer.matchFinalized?.({
+        outcome: "failure",
+        persistence: "database",
+        roomId: room.id,
+        matchId: null,
+        userIds: roomUserIds(room)
+      });
+      throw error;
+    }
+    this.observer.matchFinalized?.({
+      outcome: "success",
+      persistence: "database",
+      roomId: room.id,
+      matchId: finalized.matchId,
+      userIds: roomUserIds(room)
     });
     const result: GameFinished = {
       roomId: room.id,
@@ -807,6 +840,12 @@ function sideFor(room: Room, client: Client): PlayerSide | null {
 
 function isGuest(user: ConnectedUser): user is GuestSessionUser {
   return "sessionKind" in user && user.sessionKind === "guest";
+}
+
+function roomUserIds(room: Room): string[] {
+  return Object.values(room.clients)
+    .filter((client): client is Client => Boolean(client))
+    .map((client) => client.user.id);
 }
 
 function clearQueueTimer(entry: QueueEntry): void {
