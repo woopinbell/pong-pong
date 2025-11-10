@@ -26,6 +26,7 @@ import {
 import { createLoggerOptions } from "./requestLogging.js";
 import { readAppMode } from "./env.js";
 import { createRawWsTicket, hashWsTicket, WS_TICKET_TTL_SECONDS } from "./wsTicket.js";
+import { ApiMetrics } from "./observability.js";
 
 const WS_POLICY_VIOLATION = 1008;
 const WS_MESSAGE_TOO_BIG = 1009;
@@ -57,8 +58,22 @@ export function buildApp({
     trustProxy
   });
   const hub = new GameHub(repo);
+  const metrics = new ApiMetrics(() => hub.liveStats());
   const guests = appMode === "demo" ? guestAccess ?? new GuestAccess({ secret: sessionSecret }) : null;
   const getCurrentUser = (request: FastifyRequest) => currentUser(repo, request, guests, appMode === "demo");
+
+  app.addHook("onResponse", (request, reply, done) => {
+    metrics.observeRequest(
+      request.method,
+      request.routeOptions.url ?? "unmatched",
+      reply.statusCode,
+      reply.elapsedTime
+    );
+    done();
+  });
+  app.addHook("onClose", async () => {
+    metrics.close();
+  });
 
   installHttpErrorBoundary(app);
   app.register(cors, {
@@ -150,6 +165,7 @@ export function buildApp({
   }));
 
   app.get("/health/ready", async (request, reply) => {
+    const startedAt = performance.now();
     try {
       const repository = await repo.checkReadiness();
       const ready = repository.database === "up"
@@ -163,6 +179,7 @@ export function buildApp({
           migrations: repository.migrations
         }
       });
+      metrics.observeReadiness(body.status, performance.now() - startedAt);
       return reply.code(ready ? 200 : 503).send(body);
     } catch (error) {
       request.log.warn({ errorName: error instanceof Error ? error.name : "UnknownError" }, "readiness check failed");
@@ -171,8 +188,14 @@ export function buildApp({
         service: "pong-pong-api",
         checks: { lifecycle: "accepting", database: "down", migrations: "unknown" }
       });
+      metrics.observeReadiness("not_ready", performance.now() - startedAt);
       return reply.code(503).send(body);
     }
+  });
+
+  app.get("/metrics", async (_request, reply) => {
+    reply.header("content-type", metrics.contentType);
+    return reply.send(await metrics.scrape());
   });
 
   if (appMode === "development" || appMode === "test") {
