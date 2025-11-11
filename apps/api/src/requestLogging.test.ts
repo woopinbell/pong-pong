@@ -37,4 +37,22 @@ describe("request log redaction", () => {
     ]));
     expect(options.redact.censor).toBe("[Redacted]");
   });
+
+  it("redacts nested credentials while leaving correlation identifiers available", () => {
+    const options = createLoggerOptions("info");
+
+    expect(options.redact.paths).toEqual(expect.arrayContaining([
+      "*.cookie",
+      "*.authorization",
+      "*.sessionToken",
+      "*.ticket",
+      "*.query"
+    ]));
+    expect(options.redact.paths).not.toEqual(expect.arrayContaining([
+      "requestId",
+      "userId",
+      "roomId",
+      "matchId"
+    ]));
+  });
 });

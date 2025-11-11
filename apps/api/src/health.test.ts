@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRepository } from "@pong-pong/db";
 import { buildApp } from "./app";
 
-describe("health routes", () => {
+describe("health and metrics routes", () => {
   const closeTasks: Array<() => Promise<void>> = [];
 
   afterEach(async () => {
@@ -53,6 +53,27 @@ describe("health routes", () => {
     });
     expect(response.body).not.toContain("secret");
     expect(response.body).not.toContain("postgresql");
+  });
+
+  it("publishes Prometheus metrics with bounded labels", async () => {
+    const { app } = await setup();
+    await app.inject({ method: "GET", url: "/health/live" });
+
+    const response = await app.inject({ method: "GET", url: "/metrics" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/plain");
+    expect(response.body).toContain("pong_pong_api_http_request_duration_seconds");
+    expect(response.body).toContain("pong_pong_api_connections");
+    expect(response.body).toContain("pong_pong_api_rooms");
+    expect(response.body).toContain("pong_pong_api_database_operation_duration_seconds");
+    expect(response.body).toContain("pong_pong_api_snapshot_delivery_delay_seconds");
+    expect(response.body).toContain("pong_pong_api_snapshot_drops_total");
+    expect(response.body).toMatch(/route="\/health\/live"/);
+    expect(response.body).not.toContain("requestId");
+    expect(response.body).not.toContain("userId");
+    expect(response.body).not.toContain("roomId");
+    expect(response.body).not.toContain("matchId");
   });
 
   async function setup(repository = createMemoryRepository()) {

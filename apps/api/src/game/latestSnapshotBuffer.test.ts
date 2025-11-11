@@ -39,6 +39,32 @@ describe("LatestSnapshotBuffer", () => {
     expect(socket.sent).toEqual(["snapshot-2"]);
   });
 
+  it("reports replacement drops and delivery delay without connection identifiers", () => {
+    vi.useFakeTimers();
+    let nowMs = 100;
+    const onDropped = vi.fn();
+    const onDelivered = vi.fn();
+    const socket = fakeSocket();
+    socket.bufferedAmount = SOFT_BUFFERED_AMOUNT_BYTES + 1;
+    const buffer = new LatestSnapshotBuffer(socket, {
+      now: () => nowMs,
+      onDropped,
+      onDelivered
+    });
+
+    buffer.enqueue("snapshot-1");
+    nowMs = 125;
+    buffer.enqueue("snapshot-2");
+    expect(onDropped).toHaveBeenCalledWith("replaced");
+
+    socket.bufferedAmount = 0;
+    nowMs = 175;
+    vi.advanceTimersByTime(50);
+    socket.completeSend();
+
+    expect(onDelivered).toHaveBeenCalledWith(50);
+  });
+
   it("terminates immediately at one MiB of buffered data", () => {
     const socket = fakeSocket();
     socket.bufferedAmount = HARD_BUFFERED_AMOUNT_BYTES;
