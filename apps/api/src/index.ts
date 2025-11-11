@@ -1,6 +1,7 @@
 import { createMemoryRepository, createPostgresRepository } from "@pong-pong/db";
 import { buildApp } from "./app.js";
 import { readEnv } from "./env.js";
+import { installGracefulShutdown } from "./gracefulShutdown.js";
 
 const env = readEnv();
 const repo = env.databaseUrl ? createPostgresRepository(env.databaseUrl) : createMemoryRepository();
@@ -17,6 +18,24 @@ const app = buildApp({
 });
 app.addHook("onClose", async () => {
   await repo.close();
+});
+
+const disposeShutdownSignals = installGracefulShutdown(
+  process,
+  async (signal) => {
+    app.log.info({ signal }, "graceful shutdown started");
+    const result = await app.beginDrain(60_000);
+    app.log.info(result, "game room drain finished");
+    await app.close();
+  },
+  (error) => {
+    app.log.error({ errorName: error instanceof Error ? error.name : "UnknownError" }, "graceful shutdown failed");
+    process.exitCode = 1;
+    void app.close().catch(() => undefined);
+  }
+);
+app.addHook("onClose", async () => {
+  disposeShutdownSignals();
 });
 
 try {
