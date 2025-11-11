@@ -37,6 +37,7 @@ export const wsErrorCodeSchema = z.enum([
   "rate_limited",
   "forbidden",
   "not_found",
+  "server_draining",
   "internal_error"
 ]);
 

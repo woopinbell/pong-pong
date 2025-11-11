@@ -6,7 +6,7 @@ import type { AppRepository } from "@pong-pong/db";
 import * as http from "@pong-pong/shared";
 import type { SessionUser } from "@pong-pong/shared";
 import { WebSocket, type RawData } from "ws";
-import { GameHub } from "./gameHub.js";
+import { GameHub, type DrainResult } from "./gameHub.js";
 import {
   ApiHttpError,
   forbidden,
@@ -45,6 +45,12 @@ export interface BuildAppOptions {
   trustProxy?: boolean;
 }
 
+declare module "fastify" {
+  interface FastifyInstance {
+    beginDrain(timeoutMs?: number): Promise<DrainResult>;
+  }
+}
+
 export function buildApp({
   repo: sourceRepo,
   webOrigin,
@@ -81,6 +87,7 @@ export function buildApp({
     }
   });
   readGameStats = () => hub.liveStats();
+  let draining = false;
   const guests = appMode === "demo" ? guestAccess ?? new GuestAccess({ secret: sessionSecret }) : null;
   const getCurrentUser = async (request: FastifyRequest) => {
     const user = await currentUser(repo, request, guests, appMode === "demo");
@@ -88,6 +95,10 @@ export function buildApp({
     return user;
   };
 
+  app.decorate("beginDrain", async (timeoutMs = 60_000) => {
+    draining = true;
+    return hub.beginDrain(timeoutMs);
+  });
   app.addHook("onResponse", (request, reply, done) => {
     metrics.observeRequest(
       request.method,
@@ -98,6 +109,7 @@ export function buildApp({
     done();
   });
   app.addHook("onClose", async () => {
+    hub.close();
     metrics.close();
   });
 
@@ -195,13 +207,14 @@ export function buildApp({
     const startedAt = performance.now();
     try {
       const repository = await repo.checkReadiness();
-      const ready = repository.database === "up"
+      const ready = !draining
+        && repository.database === "up"
         && (repository.migrations === "current" || repository.migrations === "not_applicable");
       const body = parseOutput(http.readyHealthResponseSchema, {
         status: ready ? "ready" : "not_ready",
         service: "pong-pong-api",
         checks: {
-          lifecycle: "accepting",
+          lifecycle: draining ? "draining" : "accepting",
           database: repository.database,
           migrations: repository.migrations
         }
@@ -213,7 +226,11 @@ export function buildApp({
       const body = parseOutput(http.readyHealthResponseSchema, {
         status: "not_ready",
         service: "pong-pong-api",
-        checks: { lifecycle: "accepting", database: "down", migrations: "unknown" }
+        checks: {
+          lifecycle: draining ? "draining" : "accepting",
+          database: "down",
+          migrations: "unknown"
+        }
       });
       metrics.observeReadiness("not_ready", performance.now() - startedAt);
       return reply.code(503).send(body);
