@@ -13,11 +13,22 @@ export type SnapshotSocket = {
 
 type SnapshotBufferOptions = {
   now?: () => number;
+  onDelivered?: (delayMs: number) => void;
+  onDropped?: (reason: SnapshotDropReason) => void;
+};
+
+export type SnapshotDropReason = "replaced" | "connection_closed" | "congestion";
+
+type PendingSnapshot = {
+  payload: string;
+  enqueuedAtMs: number;
 };
 
 export class LatestSnapshotBuffer {
   private readonly now: () => number;
-  private pendingSnapshot: string | null = null;
+  private readonly onDelivered: (delayMs: number) => void;
+  private readonly onDropped: (reason: SnapshotDropReason) => void;
+  private pendingSnapshot: PendingSnapshot | null = null;
   private sending = false;
   private congestionStartedAtMs: number | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -25,16 +36,20 @@ export class LatestSnapshotBuffer {
 
   constructor(private readonly socket: SnapshotSocket, options: SnapshotBufferOptions = {}) {
     this.now = options.now ?? (() => performance.now());
+    this.onDelivered = options.onDelivered ?? (() => undefined);
+    this.onDropped = options.onDropped ?? (() => undefined);
   }
 
   enqueue(payload: string): void {
     if (this.closed) return;
-    this.pendingSnapshot = payload;
+    if (this.pendingSnapshot) this.onDropped("replaced");
+    this.pendingSnapshot = { payload, enqueuedAtMs: this.now() };
     this.drain();
   }
 
-  close(): void {
+  close(reason: SnapshotDropReason = "connection_closed"): void {
     this.closed = true;
+    if (this.pendingSnapshot) this.onDropped(reason);
     this.pendingSnapshot = null;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
@@ -49,14 +64,14 @@ export class LatestSnapshotBuffer {
 
     const nowMs = this.now();
     if (this.socket.bufferedAmount >= HARD_BUFFERED_AMOUNT_BYTES) {
-      this.terminate();
+      this.terminate("congestion");
       return;
     }
 
     if (this.socket.bufferedAmount > SOFT_BUFFERED_AMOUNT_BYTES) {
       this.congestionStartedAtMs ??= nowMs;
       if (nowMs - this.congestionStartedAtMs >= MAX_CONGESTION_MS) {
-        this.terminate();
+        this.terminate("congestion");
         return;
       }
       this.armRetry();
@@ -69,22 +84,25 @@ export class LatestSnapshotBuffer {
       return;
     }
 
-    const payload = this.pendingSnapshot;
-    if (payload === null) return;
+    const snapshot = this.pendingSnapshot;
+    if (snapshot === null) return;
     this.pendingSnapshot = null;
     this.sending = true;
     try {
-      this.socket.send(payload, (error) => {
+      this.socket.send(snapshot.payload, (error) => {
         this.sending = false;
         if (error) {
-          this.terminate();
+          this.onDropped("connection_closed");
+          this.terminate("connection_closed");
           return;
         }
+        this.onDelivered(Math.max(0, this.now() - snapshot.enqueuedAtMs));
         this.drain();
       });
     } catch {
       this.sending = false;
-      this.terminate();
+      this.onDropped("connection_closed");
+      this.terminate("connection_closed");
       return;
     }
     if (this.sending || this.pendingSnapshot !== null) this.armRetry();
@@ -98,9 +116,9 @@ export class LatestSnapshotBuffer {
     }, RETRY_INTERVAL_MS);
   }
 
-  private terminate(): void {
+  private terminate(reason: SnapshotDropReason): void {
     if (this.closed) return;
-    this.close();
+    this.close(reason);
     this.socket.terminate();
   }
 }

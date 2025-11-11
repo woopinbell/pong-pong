@@ -73,6 +73,18 @@ export class ApiMetrics {
     buckets: [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
     registers: [this.registry]
   });
+  private readonly snapshotDeliveryDelay = new Histogram({
+    name: "pong_pong_api_snapshot_delivery_delay_seconds",
+    help: "Time from snapshot enqueue to websocket send completion",
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1],
+    registers: [this.registry]
+  });
+  private readonly snapshotDrops = new Counter({
+    name: "pong_pong_api_snapshot_drops_total",
+    help: "Snapshots discarded before successful delivery",
+    labelNames: ["reason"] as const,
+    registers: [this.registry]
+  });
   private readonly connections = new Gauge({
     name: "pong_pong_api_connections",
     help: "Current websocket connection count",
@@ -130,6 +142,14 @@ export class ApiMetrics {
       operation: REPOSITORY_OPERATIONS.has(operation) ? operation : "other",
       outcome
     }, Math.max(0, durationMs) / 1_000);
+  }
+
+  observeSnapshotDelivery(delayMs: number): void {
+    this.snapshotDeliveryDelay.observe(Math.max(0, delayMs) / 1_000);
+  }
+
+  recordSnapshotDrop(reason: "replaced" | "connection_closed" | "congestion"): void {
+    this.snapshotDrops.inc({ reason });
   }
 
   recordFinalization(persistence: "database" | "memory", outcome: "success" | "failure"): void {

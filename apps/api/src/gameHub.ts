@@ -91,6 +91,8 @@ export interface GameHubObserver {
     matchId: string | null;
     userIds: string[];
   }): void;
+  snapshotDelivered?(delayMs: number): void;
+  snapshotDropped?(reason: "replaced" | "connection_closed" | "congestion"): void;
 }
 
 export class GameHub {
@@ -140,7 +142,10 @@ export class GameHub {
       user,
       roomId: null,
       heartbeat,
-      snapshots: new LatestSnapshotBuffer(socket),
+      snapshots: new LatestSnapshotBuffer(socket, {
+        onDelivered: (delayMs) => this.observer.snapshotDelivered?.(delayMs),
+        onDropped: (reason) => this.observer.snapshotDropped?.(reason)
+      }),
       requestId
     };
     const previous = this.clientsByUser.get(user.id);

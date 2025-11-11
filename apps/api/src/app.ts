@@ -72,6 +72,12 @@ export function buildApp({
       metrics.recordFinalization(context.persistence, context.outcome);
       const level = context.outcome === "success" ? "info" : "warn";
       app.log[level](context, "match finalization recorded");
+    },
+    snapshotDelivered: (delayMs) => {
+      metrics.observeSnapshotDelivery(delayMs);
+    },
+    snapshotDropped: (reason) => {
+      metrics.recordSnapshotDrop(reason);
     }
   });
   readGameStats = () => hub.liveStats();
