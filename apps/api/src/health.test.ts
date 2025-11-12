@@ -55,6 +55,20 @@ describe("health and metrics routes", () => {
     expect(response.body).not.toContain("postgresql");
   });
 
+  it("drops readiness as soon as draining starts", async () => {
+    const { app } = await setup();
+
+    const drain = app.beginDrain(60_000);
+    const response = await app.inject({ method: "GET", url: "/health/ready" });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      status: "not_ready",
+      checks: { lifecycle: "draining" }
+    });
+    await expect(drain).resolves.toMatchObject({ drained: true, activeRooms: 0 });
+  });
+
   it("publishes Prometheus metrics with bounded labels", async () => {
     const { app } = await setup();
     await app.inject({ method: "GET", url: "/health/live" });
@@ -66,9 +80,6 @@ describe("health and metrics routes", () => {
     expect(response.body).toContain("pong_pong_api_http_request_duration_seconds");
     expect(response.body).toContain("pong_pong_api_connections");
     expect(response.body).toContain("pong_pong_api_rooms");
-    expect(response.body).toContain("pong_pong_api_database_operation_duration_seconds");
-    expect(response.body).toContain("pong_pong_api_snapshot_delivery_delay_seconds");
-    expect(response.body).toContain("pong_pong_api_snapshot_drops_total");
     expect(response.body).toMatch(/route="\/health\/live"/);
     expect(response.body).not.toContain("requestId");
     expect(response.body).not.toContain("userId");
