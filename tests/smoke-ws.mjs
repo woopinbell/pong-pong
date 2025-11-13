@@ -69,17 +69,16 @@ soloSocket.addEventListener("message", (event) => soloEvents.push(parseEvent(eve
 
 try {
   await opened(soloSocket);
-  send(soloSocket, { type: "queue.join", mode: "queue" });
+  send(soloSocket, { type: "queue.join", mode: "ai" });
   const matched = await waitFor(() =>
-    soloEvents.find((event) => event.type === "queue.matched" && event.opponent.includes("AI")),
-  8_000);
+    soloEvents.find((event) => event.type === "queue.matched"));
   send(soloSocket, { type: "game.ready", roomId: matched.roomId });
-  const npcSnapshot = await waitFor(() => soloEvents.find((event) =>
+  const aiSnapshot = await waitFor(() => soloEvents.find((event) =>
     event.type === "game.snapshot"
-      && event.snapshot.state.players.some((player) => player.ai && player.handle.startsWith("npc-"))
+      && event.snapshot.state.players.some((player) => player.ai)
   ));
-  const npcPlayer = npcSnapshot.snapshot.state.players.find((player) => player.ai);
-  if (!npcPlayer) throw new Error("npc snapshot missing ai player");
+  const aiPlayer = aiSnapshot.snapshot.state.players.find((player) => player.ai);
+  if (!aiPlayer) throw new Error("ai snapshot missing ai player");
 } finally {
   soloSocket.close();
 }
