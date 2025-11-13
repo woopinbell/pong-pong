@@ -5,9 +5,6 @@ import { installGracefulShutdown } from "./gracefulShutdown.js";
 
 const env = readEnv();
 const repo = env.databaseUrl ? createPostgresRepository(env.databaseUrl) : createMemoryRepository();
-if (!env.databaseUrl) {
-  await repo.ensureSeedData();
-}
 
 const app = buildApp({
   repo,
