@@ -4,9 +4,7 @@ services:
     environment:
       POSTGRES_DB: pong_pong
       POSTGRES_USER: pong
-      POSTGRES_PASSWORD: pong
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pong -d pong_pong"]
       interval: 5s
@@ -15,52 +13,73 @@ services:
     volumes:
       - pong-pong-db:/var/lib/postgresql/data
 
-  api:
-    image: node:24.18.0-bookworm-slim
-    working_dir: /app
-    command: sh -c "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @pong-pong/api start"
+  migrate:
+    image: pong-pong-api:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "packages/db/dist/cli.js", "migrate"]
     environment:
-      DATABASE_URL: postgres://pong:pong@db:5432/pong_pong
-      SESSION_SECRET: dev-session-secret
-      API_PORT: 4000
-      WEB_ORIGIN: http://localhost:8080
-    volumes:
-      - .:/app
-      - api-node-modules:/app/node_modules
+      DATABASE_URL: postgres://pong:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/pong_pong
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "4000:4000"
+    restart: "no"
+
+  api:
+    image: pong-pong-api:local
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      APP_MODE: ${APP_MODE:-production}
+      TRUST_PROXY: "1"
+      DATABASE_URL: postgres://pong:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/pong_pong
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+      API_PORT: 4000
+      WEB_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    expose:
+      - "4000"
 
   web:
-    image: node:24.18.0-bookworm-slim
-    working_dir: /app
-    command: sh -c "corepack enable && corepack prepare pnpm@10.32.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @pong-pong/web build && pnpm --filter @pong-pong/web start"
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api
-      NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
-    volumes:
-      - .:/app
-      - web-node-modules:/app/node_modules
-      - web-next:/app/apps/web/.next
+    image: pong-pong-web:local
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_ORIGIN:-http://localhost:8080}/api
+        NEXT_PUBLIC_WS_URL: ${PUBLIC_WS_URL:-ws://localhost:8080/ws}
+        NEXT_PUBLIC_APP_MODE: ${APP_MODE:-production}
     depends_on:
-      - api
-    ports:
-      - "3000:3000"
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    expose:
+      - "3000"
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: Caddy.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
     ports:
       - "8080:8080"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    depends_on:
-      - web
-      - api
 
 volumes:
   pong-pong-db:
-  api-node-modules:
-  web-node-modules:
-  web-next:
