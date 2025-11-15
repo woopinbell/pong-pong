@@ -36,6 +36,86 @@ interface QueueEntry {
 
 export const MATCHMAKER_AI_FALLBACK_MS = 6_000;
 
+export class Matchmaker {
+  private readonly queue: QueueEntry[] = [];
+  private readonly playerStatuses = new Map<string, MatchmakerPlayerStatus>();
+  private readonly clock: () => number;
+  private readonly maxRatingDifference: number;
+
+  constructor(options: MatchmakerOptions) {
+    if (!Number.isFinite(options.maxRatingDifference) || options.maxRatingDifference < 0) {
+      throw new RangeError("maxRatingDifference must be a non-negative finite number");
+    }
+    this.clock = options.clock;
+    this.maxRatingDifference = options.maxRatingDifference;
+  }
+
+  get queuedCount(): number {
+    return this.queue.length;
+  }
+
+  enqueue(player: MatchmakingPlayer): MatchmakerJoinResult {
+    validatePlayer(player);
+    const existingStatus = this.playerStatuses.get(player.userId);
+    if (existingStatus) {
+      return { type: "duplicate", status: existingStatus };
+    }
+
+    const entrant = copyPlayer(player);
+    const opponentIndex = this.findClosestOpponent(entrant);
+    if (opponentIndex >= 0) {
+      const [opponent] = this.queue.splice(opponentIndex, 1);
+      this.playerStatuses.set(opponent.player.userId, "matched");
+      this.playerStatuses.set(entrant.userId, "matched");
+      return {
+        type: "matched",
+        match: {
+          left: copyPlayer(opponent.player),
+          right: copyPlayer(entrant),
+          ratingDifference: Math.abs(opponent.player.rating - entrant.rating)
+        }
+      };
+    }
+
+    const queuedAtMs = this.now();
+    this.queue.push({ player: entrant, queuedAtMs });
+    this.playerStatuses.set(entrant.userId, "queued");
+    return {
+      type: "queued",
+      queuedAtMs,
+      aiFallbackAtMs: queuedAtMs + MATCHMAKER_AI_FALLBACK_MS
+    };
+  }
+
+  queuedPlayers(): MatchmakingPlayer[] {
+    return this.queue.map((entry) => copyPlayer(entry.player));
+  }
+
+  private findClosestOpponent(entrant: MatchmakingPlayer): number {
+    let closestIndex = -1;
+    let closestDifference = Number.POSITIVE_INFINITY;
+
+    for (let index = 0; index < this.queue.length; index += 1) {
+      const candidate = this.queue[index].player;
+      if (candidate.kind !== entrant.kind) continue;
+      const difference = Math.abs(candidate.rating - entrant.rating);
+      if (difference > this.maxRatingDifference || difference >= closestDifference) continue;
+      closestIndex = index;
+      closestDifference = difference;
+    }
+
+    return closestIndex;
+  }
+
+  private now(): number {
+    const nowMs = this.clock();
+    if (!Number.isFinite(nowMs)) {
+      throw new RangeError("clock must return a finite timestamp");
+    }
+    return nowMs;
+  }
+}
+
 function validatePlayer(player: MatchmakingPlayer): void {
   if (player.userId.trim().length === 0) {
     throw new TypeError("userId must not be empty");
