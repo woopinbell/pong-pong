@@ -87,6 +87,51 @@ export class Matchmaker {
     };
   }
 
+  claimAiFallback(userId: string): AiFallbackResult {
+    if (this.playerStatuses.get(userId) !== "queued") {
+      return { type: "unavailable" };
+    }
+
+    const entryIndex = this.queue.findIndex((entry) => entry.player.userId === userId);
+    if (entryIndex < 0) {
+      this.playerStatuses.delete(userId);
+      return { type: "unavailable" };
+    }
+
+    const entry = this.queue[entryIndex];
+    const waitedMs = Math.max(0, this.now() - entry.queuedAtMs);
+    if (waitedMs < MATCHMAKER_AI_FALLBACK_MS) {
+      return { type: "waiting", remainingMs: MATCHMAKER_AI_FALLBACK_MS - waitedMs };
+    }
+
+    this.queue.splice(entryIndex, 1);
+    this.playerStatuses.set(userId, "matched");
+    return {
+      type: "ready",
+      player: copyPlayer(entry.player),
+      waitedMs
+    };
+  }
+
+  leaveQueue(userId: string): boolean {
+    if (this.playerStatuses.get(userId) !== "queued") return false;
+    const entryIndex = this.queue.findIndex((entry) => entry.player.userId === userId);
+    if (entryIndex >= 0) this.queue.splice(entryIndex, 1);
+    this.playerStatuses.delete(userId);
+    return entryIndex >= 0;
+  }
+
+  release(userId: string): boolean {
+    const status = this.playerStatuses.get(userId);
+    if (!status) return false;
+    if (status === "queued") {
+      const entryIndex = this.queue.findIndex((entry) => entry.player.userId === userId);
+      if (entryIndex >= 0) this.queue.splice(entryIndex, 1);
+    }
+    this.playerStatuses.delete(userId);
+    return true;
+  }
+
   queuedPlayers(): MatchmakingPlayer[] {
     return this.queue.map((entry) => copyPlayer(entry.player));
   }
