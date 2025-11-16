@@ -416,6 +416,7 @@ export class GameHub {
         npcFallbackTimer: null
       };
       this.queueEntries.set(client.user.id, entry);
+      this.armAiFallback(entry, join.aiFallbackAtMs - Date.now());
       this.broadcastPresence();
       return;
     }
@@ -438,16 +439,62 @@ export class GameHub {
     }
   }
 
+  private armAiFallback(entry: QueueEntry, delayMs: number): void {
+    clearQueueTimer(entry);
+    entry.npcFallbackTimer = setTimeout(() => {
+      this.matchQueuedClientWithNpc(entry).catch((error) => {
+        this.send(entry.client, {
+          type: "error",
+          code: "internal_error",
+          message: error instanceof Error ? error.message : "AI 상대를 찾지 못했습니다."
+        });
+      });
+    }, Math.max(0, delayMs));
+  }
+
   private async matchQueuedClientWithNpc(entry: QueueEntry): Promise<void> {
-    const index = this.queue.findIndex((queued) => queued.client.id === entry.client.id);
-    if (index < 0 || entry.client.socket.readyState !== WebSocket.OPEN || entry.client.roomId) return;
+    if (this.queueEntries.get(entry.client.user.id) !== entry) return;
+    if (entry.client.socket.readyState !== WebSocket.OPEN || entry.client.roomId) {
+      this.leaveQueue(entry.client);
+      return;
+    }
+    const fallback = this.matchmaker.claimAiFallback(entry.client.user.id);
+    if (fallback.type === "waiting") {
+      this.armAiFallback(entry, fallback.remainingMs);
+      return;
+    }
+    if (fallback.type === "unavailable") {
+      this.queueEntries.delete(entry.client.user.id);
+      clearQueueTimer(entry);
+      return;
+    }
+    clearQueueTimer(entry);
     const guest = isGuest(entry.client.user);
-    const npc = guest ? null : await this.findClosestNpc(entry.client);
-    if (!guest && !npc) return;
-    const [queued] = this.queue.splice(index, 1);
-    clearQueueTimer(queued);
-    this.recordWaitSample(queued.queuedAt);
-    this.createRoom(queued.client, null, { ai: true, mode: "queue", npc });
+    try {
+      const npc = guest ? null : await this.findClosestNpc(entry.client);
+      if (
+        this.queueEntries.get(entry.client.user.id) !== entry ||
+        !this.acceptingMatches ||
+        entry.client.socket.readyState !== WebSocket.OPEN ||
+        entry.client.roomId
+      ) {
+        this.matchmaker.release(entry.client.user.id);
+        return;
+      }
+      this.queueEntries.delete(entry.client.user.id);
+      if (!guest && !npc) {
+        this.matchmaker.release(entry.client.user.id);
+        throw new Error("AI 상대를 찾지 못했습니다.");
+      }
+      this.recordWaitSample(entry.queuedAtMs);
+      this.createRoom(entry.client, null, { ai: true, mode: "queue", npc });
+    } catch (error) {
+      if (this.queueEntries.get(entry.client.user.id) === entry) {
+        this.queueEntries.delete(entry.client.user.id);
+      }
+      this.matchmaker.release(entry.client.user.id);
+      throw error;
+    }
   }
 
   private async findClosestNpc(client: Client): Promise<PublicUser | null> {
