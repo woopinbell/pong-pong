@@ -116,6 +116,10 @@ export interface FinalizeMatchResult {
   created: boolean;
 }
 
+export interface MatchResultRepository {
+  finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult>;
+}
+
 export interface TournamentMatchRecord {
   id: string;
   tournamentId: string;
@@ -127,7 +131,7 @@ export interface TournamentMatchRecord {
   winnerId: string | null;
 }
 
-export interface AppRepository {
+export interface AppRepository extends MatchResultRepository {
   close(): Promise<void>;
   checkReadiness(): Promise<RepositoryReadiness>;
   ensureSeedData(profile?: SeedProfile): Promise<void>;
@@ -150,7 +154,6 @@ export interface AppRepository {
   requestFriend(requesterId: string, addresseeHandle: string): Promise<FriendSummary>;
   acceptFriend(userId: string, friendshipId: string): Promise<FriendSummary>;
   createMatch(input: CreateMatchInput): Promise<string>;
-  finalizeMatch(command: FinalizeMatchCommand): Promise<FinalizeMatchResult>;
   listLobbyChat(): Promise<ChatMessage[]>;
   createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage>;
   listTournaments(): Promise<TournamentSummary[]>;

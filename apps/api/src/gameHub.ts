@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
-import type { AppRepository } from "@pong-pong/db";
+import type { AppRepository, MatchResultRepository } from "@pong-pong/db";
 import {
   encodeServerEvent,
   parseClientEvent,
@@ -47,6 +47,14 @@ type QueueEntry = {
   queuedAt: number;
   npcFallbackTimer: NodeJS.Timeout | null;
 };
+
+type GameHubRepository = Pick<
+  AppRepository,
+  | "createChatMessage"
+  | "getTournamentMatch"
+  | "listNpcOpponents"
+  | "startTournamentMatch"
+> & MatchResultRepository;
 
 type Room = {
   id: string;
@@ -122,7 +130,7 @@ export class GameHub {
   } | null = null;
 
   constructor(
-    private readonly repo: AppRepository,
+    private readonly repo: GameHubRepository,
     private readonly observer: GameHubObserver = {}
   ) {}
 
