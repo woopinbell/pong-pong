@@ -18,6 +18,7 @@ import { DEFAULT_TIMESTEP_MS } from "./game/fixedStepScheduler.js";
 import { ConnectionHeartbeat } from "./game/heartbeat.js";
 import { InputGate } from "./game/inputGate.js";
 import { HARD_BUFFERED_AMOUNT_BYTES, LatestSnapshotBuffer } from "./game/latestSnapshotBuffer.js";
+import { Matchmaker, type MatchmakingPlayer } from "./game/matchmaker.js";
 import { PongAi } from "./game/pongAi.js";
 import { PongSimulation, type PongSimulationState } from "./game/pongSimulation.js";
 import { RoomSession } from "./game/roomSession.js";
@@ -45,6 +46,7 @@ type VersionlessServerEvent = ServerEvent extends infer Event
 type QueueEntry = {
   client: Client;
   queuedAt: number;
+  queuedAtMs: number;
   npcFallbackTimer: NodeJS.Timeout | null;
 };
 
@@ -75,6 +77,7 @@ type Room = {
 };
 
 const NPC_QUEUE_FALLBACK_MS = 6000;
+const MAX_MATCHMAKING_RATING_DIFFERENCE = 200;
 const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
@@ -112,6 +115,11 @@ export class GameHub {
   private readonly clients = new Map<string, Client>();
   private readonly clientsByUser = new Map<string, Client>();
   private readonly queue: QueueEntry[] = [];
+  private readonly queueEntries = new Map<string, QueueEntry>();
+  private readonly matchmaker = new Matchmaker({
+    clock: () => Date.now(),
+    maxRatingDifference: MAX_MATCHMAKING_RATING_DIFFERENCE
+  });
   private readonly rooms = new Map<string, Room>();
   private readonly tournamentWaiters = new Map<string, Client[]>();
   private readonly waitSamples: number[] = [];
@@ -384,32 +392,50 @@ export class GameHub {
       this.send(client, { type: "error", code: "forbidden", message: "이미 진행 중인 경기가 있습니다." });
       return;
     }
-    this.leaveQueue(client);
     this.pruneQueue();
     if (mode === "ai") {
+      this.leaveQueue(client);
       this.createRoom(client, null, { ai: true, mode: "ai" });
       return;
     }
-    const opponentIndex = this.findClosestQueuedOpponent(client);
-    if (opponentIndex < 0) {
-      const entry: QueueEntry = { client, queuedAt: Date.now(), npcFallbackTimer: null };
-      entry.npcFallbackTimer = setTimeout(() => {
-        this.matchQueuedClientWithNpc(entry).catch((error) => {
-          this.send(client, {
-            type: "error",
-            code: "internal_error",
-            message: error instanceof Error ? error.message : "AI 상대를 찾지 못했습니다."
-          });
-        });
-      }, NPC_QUEUE_FALLBACK_MS);
-      this.queue.push(entry);
+
+    const join = this.matchmaker.enqueue(matchmakingPlayer(client));
+    if (join.type === "duplicate") {
+      this.send(client, {
+        type: "error",
+        code: "forbidden",
+        message: join.status === "queued" ? "이미 대기열에 참가했습니다." : "이미 경기가 배정되었습니다."
+      });
+      return;
+    }
+    if (join.type === "queued") {
+      const entry: QueueEntry = {
+        client,
+        queuedAt: join.queuedAtMs,
+        queuedAtMs: join.queuedAtMs,
+        npcFallbackTimer: null
+      };
+      this.queueEntries.set(client.user.id, entry);
       this.broadcastPresence();
       return;
     }
-    const [opponent] = this.queue.splice(opponentIndex, 1);
+
+    const opponent = this.queueEntries.get(join.match.left.userId);
+    if (!opponent) {
+      this.matchmaker.release(join.match.left.userId);
+      this.matchmaker.release(join.match.right.userId);
+      throw new Error("대기 중인 상대 연결을 찾지 못했습니다.");
+    }
+    this.queueEntries.delete(opponent.client.user.id);
     clearQueueTimer(opponent);
-    this.recordWaitSample(opponent.queuedAt);
-    this.createRoom(opponent.client, client, { ai: false, mode: "queue" });
+    this.recordWaitSample(opponent.queuedAtMs);
+    try {
+      this.createRoom(opponent.client, client, { ai: false, mode: "queue" });
+    } catch (error) {
+      this.matchmaker.release(opponent.client.user.id);
+      this.matchmaker.release(client.user.id);
+      throw error;
+    }
   }
 
   private async matchQueuedClientWithNpc(entry: QueueEntry): Promise<void> {
@@ -944,6 +970,14 @@ function sideFor(room: Room, client: Client): PlayerSide | null {
 
 function isGuest(user: ConnectedUser): user is GuestSessionUser {
   return "sessionKind" in user && user.sessionKind === "guest";
+}
+
+function matchmakingPlayer(client: Client): MatchmakingPlayer {
+  return {
+    userId: client.user.id,
+    rating: client.user.rating,
+    kind: isGuest(client.user) ? "guest" : "registered"
+  };
 }
 
 function roomUserIds(room: Room): string[] {
