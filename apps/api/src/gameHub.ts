@@ -702,20 +702,31 @@ export class GameHub {
         }
       }
     };
-    this.rooms.set(roomId, room);
-    this.observer.roomCreated?.({
-      roomId,
-      requestIds: [left.requestId, right?.requestId]
-        .filter((requestId): requestId is string => Boolean(requestId)),
-      userIds: [left.user.id, ...(right ? [right.user.id] : [])]
-    });
-    left.roomId = roomId;
-    if (right) right.roomId = roomId;
-    this.send(left, { type: "queue.matched", roomId, side: "left", opponent: rightPlayer?.displayName ?? "연습 AI" });
-    if (right) this.send(right, { type: "queue.matched", roomId, side: "right", opponent: left.user.displayName });
-    this.broadcastSnapshot(room);
-    this.broadcastPresence();
-    return roomId;
+    try {
+      this.rooms.set(roomId, room);
+      this.observer.roomCreated?.({
+        roomId,
+        requestIds: [left.requestId, right?.requestId]
+          .filter((requestId): requestId is string => Boolean(requestId)),
+        userIds: [left.user.id, ...(right ? [right.user.id] : [])]
+      });
+      left.roomId = roomId;
+      if (right) right.roomId = roomId;
+      this.send(left, { type: "queue.matched", roomId, side: "left", opponent: rightPlayer?.displayName ?? "연습 AI" });
+      if (right) this.send(right, { type: "queue.matched", roomId, side: "right", opponent: left.user.displayName });
+      this.broadcastSnapshot(room);
+      this.broadcastPresence();
+      return roomId;
+    } catch (error) {
+      this.roomScheduler.unregister(roomId);
+      this.clearReconnectTimer(room);
+      this.rooms.delete(roomId);
+      if (left.roomId === roomId) left.roomId = null;
+      if (right?.roomId === roomId) right.roomId = null;
+      this.notifyDrainProgress();
+      this.broadcastPresence();
+      throw error;
+    }
   }
 
   private markReady(client: Client, roomId: string): void {
@@ -872,24 +883,27 @@ export class GameHub {
       });
       throw error;
     }
-    this.observer.matchFinalized?.({
-      outcome: "success",
-      persistence: "database",
-      roomId: room.id,
-      matchId: finalized.matchId,
-      userIds: roomUserIds(room)
-    });
-    const result: GameFinished = {
-      roomId: room.id,
-      matchId: finalized.matchId,
-      persisted: true,
-      winnerSide,
-      leftScore: room.snapshot.state.leftScore,
-      rightScore: room.snapshot.state.rightScore,
-      ratingDelta: 16
-    };
-    this.broadcastRoom(room.id, { type: "game.finished", result });
-    this.removeFinishedRoom(room);
+    try {
+      this.observer.matchFinalized?.({
+        outcome: "success",
+        persistence: "database",
+        roomId: room.id,
+        matchId: finalized.matchId,
+        userIds: roomUserIds(room)
+      });
+      const result: GameFinished = {
+        roomId: room.id,
+        matchId: finalized.matchId,
+        persisted: true,
+        winnerSide,
+        leftScore: room.snapshot.state.leftScore,
+        rightScore: room.snapshot.state.rightScore,
+        ratingDelta: 16
+      };
+      this.broadcastRoom(room.id, { type: "game.finished", result });
+    } finally {
+      this.removeFinishedRoom(room);
+    }
   }
 
   private rememberGuestResult(room: Room, result: GameFinished): void {
