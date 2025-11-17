@@ -21,7 +21,7 @@ services:
 
   api:
     environment:
-      DATABASE_URL: postgres://pong:${POSTGRES_PASSWORD:-pong}@toxiproxy:15432/pong_pong
+      DATABASE_URL: postgres://pong:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@toxiproxy:15432/pong_pong
     depends_on:
       toxiproxy-bootstrap:
         condition: service_completed_successfully
