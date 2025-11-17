@@ -45,7 +45,6 @@ type VersionlessServerEvent = ServerEvent extends infer Event
 
 type QueueEntry = {
   client: Client;
-  queuedAt: number;
   queuedAtMs: number;
   npcFallbackTimer: NodeJS.Timeout | null;
 };
@@ -76,7 +75,6 @@ type Room = {
   guest: boolean;
 };
 
-const NPC_QUEUE_FALLBACK_MS = 6000;
 const MAX_MATCHMAKING_RATING_DIFFERENCE = 200;
 const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
@@ -114,7 +112,6 @@ export interface GameHubObserver {
 export class GameHub {
   private readonly clients = new Map<string, Client>();
   private readonly clientsByUser = new Map<string, Client>();
-  private readonly queue: QueueEntry[] = [];
   private readonly queueEntries = new Map<string, QueueEntry>();
   private readonly matchmaker = new Matchmaker({
     clock: () => Date.now(),
@@ -363,6 +360,7 @@ export class GameHub {
   private abandonRoom(room: Room): void {
     this.roomScheduler.unregister(room.id);
     this.clearReconnectTimer(room);
+    this.releaseMatchmakingReservations(room);
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
     }
@@ -411,7 +409,6 @@ export class GameHub {
     if (join.type === "queued") {
       const entry: QueueEntry = {
         client,
-        queuedAt: join.queuedAtMs,
         queuedAtMs: join.queuedAtMs,
         npcFallbackTimer: null
       };
@@ -546,27 +543,13 @@ export class GameHub {
     await this.repo.startTournamentMatch(matchId, roomId);
   }
 
-  private findClosestQueuedOpponent(client: Client): number {
-    let bestIndex = -1;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    for (let index = 0; index < this.queue.length; index += 1) {
-      const candidate = this.queue[index];
-      if (isGuest(candidate.client.user) !== isGuest(client.user)) continue;
-      const distance = Math.abs(candidate.client.user.rating - client.user.rating);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        bestIndex = index;
-      }
-    }
-    return bestIndex;
-  }
-
   private leaveQueue(client: Client): void {
-    const index = this.queue.findIndex((queued) => queued.client.id === client.id);
-    if (index >= 0) {
-      const [entry] = this.queue.splice(index, 1);
-      clearQueueTimer(entry);
-    }
+    const entry = this.queueEntries.get(client.user.id);
+    const leftQueue = this.matchmaker.leaveQueue(client.user.id);
+    if (!entry) return;
+    if (!leftQueue) this.matchmaker.release(client.user.id);
+    this.queueEntries.delete(client.user.id);
+    clearQueueTimer(entry);
   }
 
   private leaveTournamentWaiters(client: Client): void {
@@ -578,11 +561,8 @@ export class GameHub {
   }
 
   private pruneQueue(): void {
-    for (let index = this.queue.length - 1; index >= 0; index -= 1) {
-      if (this.queue[index].client.socket.readyState !== WebSocket.OPEN) {
-        const [entry] = this.queue.splice(index, 1);
-        clearQueueTimer(entry);
-      }
+    for (const entry of this.queueEntries.values()) {
+      if (entry.client.socket.readyState !== WebSocket.OPEN) this.leaveQueue(entry.client);
     }
   }
 
@@ -594,7 +574,7 @@ export class GameHub {
     return {
       onlinePlayers: this.clients.size,
       playingPlayers,
-      queuedPlayers: this.queue.length,
+      queuedPlayers: this.matchmaker.queuedCount,
       activeRooms: this.rooms.size,
       averageWaitSeconds
     };
@@ -602,8 +582,8 @@ export class GameHub {
 
   beginDrain(timeoutMs: number): Promise<DrainResult> {
     this.acceptingMatches = false;
-    for (const entry of this.queue.splice(0)) {
-      clearQueueTimer(entry);
+    for (const entry of [...this.queueEntries.values()]) {
+      this.leaveQueue(entry.client);
       this.sendDrainingError(entry.client);
     }
     for (const waiters of this.tournamentWaiters.values()) {
@@ -631,10 +611,13 @@ export class GameHub {
 
   close(): void {
     this.acceptingMatches = false;
-    for (const entry of this.queue.splice(0)) clearQueueTimer(entry);
+    for (const entry of [...this.queueEntries.values()]) this.leaveQueue(entry.client);
     this.tournamentWaiters.clear();
     this.roomScheduler.stop();
-    for (const room of this.rooms.values()) this.clearReconnectTimer(room);
+    for (const room of this.rooms.values()) {
+      this.clearReconnectTimer(room);
+      this.releaseMatchmakingReservations(room);
+    }
     this.rooms.clear();
     for (const recent of this.recentGuestResults.values()) clearTimeout(recent.cleanupTimer);
     this.recentGuestResults.clear();
@@ -847,19 +830,22 @@ export class GameHub {
         rightScore: room.snapshot.state.rightScore,
         ratingDelta: 0
       };
-      this.observer.matchFinalized?.({
-        outcome: "success",
-        persistence: "memory",
-        roomId: room.id,
-        matchId: null,
-        userIds: roomUserIds(room)
-      });
-      this.rememberGuestResult(room, result);
-      this.broadcastRoom(room.id, { type: "game.finished", result });
-      this.removeFinishedRoom(room);
+      try {
+        this.observer.matchFinalized?.({
+          outcome: "success",
+          persistence: "memory",
+          roomId: room.id,
+          matchId: null,
+          userIds: roomUserIds(room)
+        });
+        this.rememberGuestResult(room, result);
+        this.broadcastRoom(room.id, { type: "game.finished", result });
+      } finally {
+        this.removeFinishedRoom(room);
+      }
       return;
     }
-    let finalized: Awaited<ReturnType<AppRepository["finalizeMatch"]>>;
+    let finalized: Awaited<ReturnType<MatchResultRepository["finalizeMatch"]>>;
     try {
       finalized = await this.repo.finalizeMatch({
         resultKey: `room:${room.id}:finished`,
@@ -876,6 +862,7 @@ export class GameHub {
         } : {})
       });
     } catch (error) {
+      this.releaseMatchmakingReservations(room);
       this.observer.matchFinalized?.({
         outcome: "failure",
         persistence: "database",
@@ -936,12 +923,19 @@ export class GameHub {
 
   private removeFinishedRoom(room: Room): void {
     this.roomScheduler.unregister(room.id);
+    this.releaseMatchmakingReservations(room);
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
     }
     this.rooms.delete(room.id);
     this.notifyDrainProgress();
     this.broadcastPresence();
+  }
+
+  private releaseMatchmakingReservations(room: Room): void {
+    for (const client of Object.values(room.clients)) {
+      if (client) this.matchmaker.release(client.user.id);
+    }
   }
 
   private sendDrainingError(client: Client): void {
