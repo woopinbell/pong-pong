@@ -99,6 +99,8 @@ test("load overlay routes API database traffic and the public edge through Toxip
 
   assert.match(compose, /ghcr\.io\/shopify\/toxiproxy:2\.12\.0/);
   assert.match(compose, /DATABASE_URL: postgres:\/\/pong:.*@toxiproxy:15432\/pong_pong/);
+  assert.match(compose, /\$\{POSTGRES_PASSWORD:\?/);
+  assert.doesNotMatch(compose, /\$\{POSTGRES_PASSWORD:-/);
   assert.match(compose, /127\.0\.0\.1:\$\{TOXIPROXY_EDGE_PORT:-18080\}:18080/);
   assert.match(compose, /toxiproxy-bootstrap:/);
   assert.match(compose, /service_completed_successfully/);
