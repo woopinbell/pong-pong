@@ -91,7 +91,7 @@ export async function inspectMigrationSet(
   return compareMigrationSets(expectedNames, appliedNames);
 }
 
-export async function migrateDatabase(databaseUrl: string): Promise<void> {
+export async function migrateDatabase(databaseUrl: string, targetMigration?: string): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl });
   const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
 
@@ -100,7 +100,9 @@ export async function migrateDatabase(databaseUrl: string): Promise<void> {
       db,
       provider: new SqlMigrationProvider()
     });
-    const { error, results } = await migrator.migrateToLatest();
+    const { error, results } = targetMigration
+      ? await migrator.migrateTo(targetMigration)
+      : await migrator.migrateToLatest();
 
     if (error) {
       const failedMigration = results?.find((result) => result.status === "Error");
