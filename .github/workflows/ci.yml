@@ -68,3 +68,92 @@ jobs:
 
       - name: Run PostgreSQL integration tests
         run: pnpm postgres-integration
+
+  process-and-browser:
+    name: HTTP, WebSocket, and browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: pong_pong_test
+          POSTGRES_USER: pong
+          POSTGRES_PASSWORD: pong
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pong -d pong_pong_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://pong:pong@127.0.0.1:5432/pong_pong_test
+      API_BASE_URL: http://127.0.0.1:4000
+      WS_URL: ws://127.0.0.1:4000/ws
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build production processes
+        run: pnpm build
+
+      - name: Prepare the process-test database
+        run: |
+          pnpm --filter @pong-pong/db migrate
+          pnpm --filter @pong-pong/db seed:dev
+
+      - name: Run process smoke and browser tests
+        env:
+          APP_MODE: development
+          SESSION_SECRET: ci-process-session-secret-32-bytes
+          LOG_LEVEL: warn
+        run: |
+          set -euo pipefail
+          node apps/api/dist/index.js >/tmp/pong-api.log 2>&1 &
+          API_PID=$!
+          pnpm --filter @pong-pong/web start >/tmp/pong-web.log 2>&1 &
+          WEB_PID=$!
+          cleanup() {
+            kill "$API_PID" "$WEB_PID" 2>/dev/null || true
+            wait "$API_PID" "$WEB_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:4000/health/ready >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4000/health/ready >/dev/null
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000 >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3000 >/dev/null
+
+          pnpm smoke:http
+          pnpm smoke:ws
+          pnpm e2e
