@@ -836,17 +836,19 @@ class PostgresRepository implements AppRepository {
   }
 
   async setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser> {
-    const result = await sql<UserRow>`
-      update users
-      set status = ${banned ? "banned" : "active"}, banned_at = ${banned ? sql`now()` : null}
-      where id = ${targetUserId}
-      returning *
-    `.execute(this.db);
-    await sql`
-      insert into admin_actions (actor_id, target_user_id, action, reason)
-      values (${actorId}, ${targetUserId}, ${banned ? "ban" : "unban"}, ${reason})
-    `.execute(this.db);
-    return toPublicUser(firstRow(result));
+    return this.db.transaction().execute(async (transaction) => {
+      const result = await sql<UserRow>`
+        update users
+        set status = ${banned ? "banned" : "active"}, banned_at = ${banned ? sql`now()` : null}
+        where id = ${targetUserId}
+        returning *
+      `.execute(transaction);
+      await sql`
+        insert into admin_actions (actor_id, target_user_id, action, reason)
+        values (${actorId}, ${targetUserId}, ${banned ? "ban" : "unban"}, ${reason})
+      `.execute(transaction);
+      return toPublicUser(firstRow(result));
+    });
   }
 
   private async tournamentFromRow(row: TournamentWithCreatorRow): Promise<TournamentSummary> {
