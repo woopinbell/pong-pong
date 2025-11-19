@@ -1,3 +1,6 @@
+import { Pool } from "pg";
+import { migrateDatabase } from "./migrator.js";
+
 const ISOLATED_TEST_SCHEMA = /^test_[a-f0-9]{32}$/;
 const DEDICATED_TEST_DATABASE = /^(?:test(?:_[a-z0-9][a-z0-9_-]*)?|[a-z0-9][a-z0-9_-]*_test)$/;
 
@@ -55,6 +58,36 @@ export function resolveTestResetTarget(env: NodeJS.ProcessEnv): TestResetTarget 
   }
 
   return { databaseUrl, databaseName, schema };
+}
+
+export async function resetTestDatabase(
+  env: NodeJS.ProcessEnv = process.env
+): Promise<TestResetTarget> {
+  const target = resolveTestResetTarget(env);
+  const controlUrl = new URL(target.databaseUrl);
+  controlUrl.searchParams.delete("options");
+  const pool = new Pool({ connectionString: controlUrl.toString() });
+  const quotedSchema = `"${target.schema}"`;
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(`drop schema if exists ${quotedSchema} cascade`);
+      await client.query(`create schema ${quotedSchema}`);
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+  }
+
+  await migrateDatabase(target.databaseUrl);
+  return target;
 }
 
 function unsafeTarget(): never {

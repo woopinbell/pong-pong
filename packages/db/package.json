@@ -19,6 +19,7 @@
     "migrate": "tsx src/cli.ts migrate",
     "seed:dev": "tsx src/cli.ts seed:dev",
     "seed:demo": "tsx src/cli.ts seed:demo",
+    "reset:test": "NODE_ENV=test tsx src/cli.ts reset:test",
     "migrate:prod": "node dist/cli.js migrate",
     "user:set-role": "tsx src/cli.ts user:set-role",
     "memory-smoke": "tsx src/cli.ts memory-smoke",
