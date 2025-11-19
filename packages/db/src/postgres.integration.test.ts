@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { createPostgresRepository, type AppRepository } from "./index";
 import { migrateDatabase } from "./migrator";
+import { resetTestDatabase } from "./testReset";
 
 const POSTGRES_IMAGE = "postgres:16-alpine";
 const TEST_DATABASE = "pong_pong_test";
@@ -134,6 +135,41 @@ describe("PostgreSQL integration", () => {
       )).resolves.toMatchObject({ rows: [{ count: 0 }] });
       expect(await appliedMigrations(pool)).toContain("005_expire_legacy_sessions");
     }, { migrate: false });
+  });
+
+  it("resets only the selected isolated schema and reapplies migrations", async () => {
+    const siblingSchema = `test_${randomUUID().replaceAll("-", "")}`;
+    const pool = requireAdminPool();
+    await pool.query(`create schema ${quoteSchema(siblingSchema)}`);
+    await pool.query(`create table ${quoteSchema(siblingSchema)}.reset_guard_marker (id integer primary key)`);
+
+    try {
+      await withIsolatedDatabase(async ({ databaseUrl, openPool, openRepository }) => {
+        const repository = openRepository();
+        const isolatedPool = openPool();
+        await repository.upsertDevUser({
+          handle: "reset-test-user",
+          displayName: "Reset Test User"
+        });
+
+        await resetTestDatabase({ NODE_ENV: "test", TEST_DATABASE_URL: databaseUrl });
+
+        await expect(isolatedPool.query<{ count: number }>(
+          "select count(*)::integer as count from users"
+        )).resolves.toMatchObject({ rows: [{ count: 0 }] });
+        await expect(repository.checkReadiness()).resolves.toEqual({
+          database: "up",
+          migrations: "current"
+        });
+        const sibling = await pool.query<{ exists: boolean }>(
+          "select exists(select 1 from pg_tables where schemaname = $1 and tablename = 'reset_guard_marker') as exists",
+          [siblingSchema]
+        );
+        expect(sibling.rows[0]?.exists).toBe(true);
+      });
+    } finally {
+      await pool.query(`drop schema if exists ${quoteSchema(siblingSchema)} cascade`);
+    }
   });
 
   it("keeps the demo seed limited to NPC accounts", async () => {
