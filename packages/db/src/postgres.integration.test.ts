@@ -232,6 +232,42 @@ describe("PostgreSQL integration", () => {
     });
   });
 
+  it("rolls back a ban when its audit record cannot be written", async () => {
+    await withIsolatedDatabase(async ({ openPool, openRepository }) => {
+      const repository = openRepository();
+      const pool = openPool();
+      const actor = await repository.upsertDevUser({
+        handle: "ban-transaction-actor",
+        displayName: "Ban Transaction Actor"
+      });
+      const target = await repository.upsertDevUser({
+        handle: "ban-transaction-target",
+        displayName: "Ban Transaction Target"
+      });
+      await pool.query(`
+        alter table admin_actions
+        add constraint admin_actions_reject_test_reason
+        check (reason <> 'force audit failure')
+      `);
+
+      await expect(repository.setUserBan(
+        actor.id,
+        target.id,
+        true,
+        "force audit failure"
+      )).rejects.toMatchObject({ constraint: "admin_actions_reject_test_reason" });
+
+      const storedUser = await pool.query<{ status: string; banned_at: Date | null }>(
+        "select status, banned_at from users where id = $1",
+        [target.id]
+      );
+      expect(storedUser.rows).toEqual([{ status: "active", banned_at: null }]);
+      await expect(pool.query<{ count: number }>(
+        "select count(*)::integer as count from admin_actions"
+      )).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    });
+  });
+
   it("stores only ticket hashes and consumes a ticket atomically once", async () => {
     await withIsolatedDatabase(async ({ openPool, openRepository }) => {
       const repository = openRepository();
