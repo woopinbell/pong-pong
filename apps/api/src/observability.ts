@@ -5,6 +5,7 @@ import {
   Registry,
   collectDefaultMetrics
 } from "prom-client";
+import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import type { AppRepository } from "@pong-pong/db";
 
 interface LiveGameStats {
@@ -52,6 +53,8 @@ const REPOSITORY_OPERATIONS = new Set([
 
 export class ApiMetrics {
   private readonly registry = new Registry();
+  private readonly eventLoopDelay: IntervalHistogram;
+  private readonly eventLoopLagP95: Gauge;
   private readonly requestDuration = new Histogram({
     name: "pong_pong_api_http_request_duration_seconds",
     help: "HTTP request duration in seconds",
@@ -114,6 +117,19 @@ export class ApiMetrics {
   });
 
   constructor(private readonly readGameStats: () => LiveGameStats) {
+    this.eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+    this.eventLoopLagP95 = new Gauge({
+      name: "pong_pong_api_event_loop_lag_p95_seconds",
+      help: "95th percentile of recorded event loop delay in seconds",
+      registers: [this.registry],
+      collect: () => {
+        const delayNanoseconds = this.eventLoopDelay.percentile(95);
+        this.eventLoopLagP95.set(
+          Number.isFinite(delayNanoseconds) ? delayNanoseconds / 1_000_000_000 : 0
+        );
+      }
+    });
+    this.eventLoopDelay.enable();
     collectDefaultMetrics({
       register: this.registry,
       prefix: "pong_pong_api_",
@@ -169,6 +185,7 @@ export class ApiMetrics {
   }
 
   close(): void {
+    this.eventLoopDelay.disable();
     this.registry.clear();
   }
 }
