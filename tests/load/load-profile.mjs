@@ -51,6 +51,7 @@ export function createLoadProfile(environment = {}) {
         connection_success: ["rate>=0.99"],
         reconnect_success: ["rate>=0.99"],
         snapshot_delay_ms: ["p(95)<=150", "p(99)<=250"],
+        event_loop_lag_p95_ms: ["p(95)<=50"],
         normal_snapshot_drop_rate: ["rate<0.01"],
         finalize_results: [`count>=${rooms}`],
         finalize_failures: ["count==0"],

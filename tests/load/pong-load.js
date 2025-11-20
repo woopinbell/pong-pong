@@ -7,11 +7,13 @@ import { createLoadProfile } from "./load-profile.mjs";
 
 const profile = createLoadProfile(__ENV);
 const apiBaseUrl = (__ENV.API_BASE_URL || "http://127.0.0.1:4000").replace(/\/$/, "");
+const metricsBaseUrl = (__ENV.METRICS_BASE_URL || "http://127.0.0.1:14000").replace(/\/$/, "");
 const websocketUrl = __ENV.WS_URL || "ws://127.0.0.1:4000/ws";
 
 const connectionSuccess = new Rate("connection_success");
 const reconnectSuccess = new Rate("reconnect_success");
 const snapshotDelay = new Trend("snapshot_delay_ms");
+const eventLoopLagP95 = new Trend("event_loop_lag_p95_ms");
 const normalSnapshotDropRate = new Rate("normal_snapshot_drop_rate");
 const finalizeResults = new Counter("finalize_results");
 const finalizeFailures = new Counter("finalize_failures");
@@ -28,6 +30,24 @@ export function setup() {
   if (response.status !== 200) {
     fail(`API readiness failed with ${response.status}`);
   }
+}
+
+export function teardown() {
+  const response = http.get(`${metricsBaseUrl}/metrics`, {
+    responseType: "text",
+    tags: { operation: "metrics" }
+  });
+  if (response.status !== 200 || typeof response.body !== "string") {
+    fail(`API metrics failed with ${response.status}`);
+  }
+  const match = response.body.match(
+    /^pong_pong_api_event_loop_lag_p95_seconds\s+([0-9.eE+-]+)$/m
+  );
+  const seconds = Number(match?.[1]);
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    fail("API event-loop p95 metric is missing or invalid");
+  }
+  eventLoopLagP95.add(seconds * 1_000);
 }
 
 export default function () {
