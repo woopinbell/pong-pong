@@ -20,6 +20,7 @@ test("default profile attempts 500 connections and observes 50 rooms", () => {
   assert.deepEqual(profile.options.thresholds.connection_success, ["rate>=0.99"]);
   assert.deepEqual(profile.options.thresholds.reconnect_success, ["rate>=0.99"]);
   assert.deepEqual(profile.options.thresholds.snapshot_delay_ms, ["p(95)<=150", "p(99)<=250"]);
+  assert.deepEqual(profile.options.thresholds.event_loop_lag_p95_ms, ["p(95)<=50"]);
   assert.deepEqual(profile.options.thresholds.normal_snapshot_drop_rate, ["rate<0.01"]);
   assert.deepEqual(profile.options.thresholds.finalize_failures, ["count==0"]);
   assert.deepEqual(profile.options.thresholds.finalize_duplicates, ["count==0"]);
@@ -49,6 +50,7 @@ test("k6 scenario records every required service-level indicator", async () => {
     "connection_success",
     "reconnect_success",
     "snapshot_delay_ms",
+    "event_loop_lag_p95_ms",
     "normal_snapshot_drop_rate",
     "finalize_results",
     "finalize_failures",
@@ -64,6 +66,8 @@ test("k6 scenario records every required service-level indicator", async () => {
   assert.match(source, /type: "game\.ready"/);
   assert.match(source, /inputSeq/);
   assert.match(source, /serverTimeMs/);
+  assert.match(source, /METRICS_BASE_URL/);
+  assert.match(source, /pong_pong_api_event_loop_lag_p95_seconds/);
 });
 
 test("Toxiproxy plan separates PostgreSQL and edge failure paths", () => {
@@ -102,6 +106,7 @@ test("load overlay routes API database traffic and the public edge through Toxip
   assert.match(compose, /\$\{POSTGRES_PASSWORD:\?/);
   assert.doesNotMatch(compose, /\$\{POSTGRES_PASSWORD:-/);
   assert.match(compose, /127\.0\.0\.1:\$\{TOXIPROXY_EDGE_PORT:-18080\}:18080/);
+  assert.match(compose, /127\.0\.0\.1:\$\{API_METRICS_PORT:-14000\}:4000/);
   assert.match(compose, /toxiproxy-bootstrap:/);
   assert.match(compose, /service_completed_successfully/);
 });
