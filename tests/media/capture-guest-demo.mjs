@@ -16,6 +16,7 @@ const browser = await chromium.launch({ headless: true });
 const rawFiles = [];
 try {
   rawFiles.push(await captureGuestEntry(browser));
+  rawFiles.push(...await capturePvpReconnect(browser));
 } finally {
   await browser.close();
 }
@@ -24,7 +25,9 @@ await verifyFiles(rawFiles);
 await mkdir(draftDir, { recursive: true });
 
 const selectedFiles = [
-  await compressPng(rawFiles[0], "guest-entry-desktop.png")
+  await compressPng(rawFiles[0], "guest-entry-desktop.png"),
+  await compressPng(rawFiles[1], "guest-pvp-desktop.png"),
+  await compressWebm(rawFiles[2], "guest-pvp-reconnect.webm")
 ];
 await verifyFiles(selectedFiles);
 
@@ -44,6 +47,71 @@ async function captureGuestEntry(browser) {
     return output;
   } finally {
     await context.close();
+  }
+}
+
+async function capturePvpReconnect(browser) {
+  const videoDir = path.join(rawDir, "pvp-video");
+  await mkdir(videoDir, { recursive: true });
+  const leftContext = await browser.newContext({
+    baseURL,
+    viewport: { width: 1280, height: 720 },
+    recordVideo: { dir: videoDir, size: { width: 1280, height: 720 } }
+  });
+  const rightContext = await browser.newContext({ baseURL, viewport: { width: 1280, height: 720 } });
+  const leftPage = await leftContext.newPage();
+  const rightPage = await rightContext.newPage();
+  const leftVideo = leftPage.video();
+  assert(leftVideo, "PvP 녹화를 시작하지 못했습니다.");
+
+  let outputVideo;
+  try {
+    const [leftName, rightName] = await Promise.all([
+      enterAsGuest(leftPage),
+      enterAsGuest(rightPage)
+    ]);
+
+    const connections = [];
+    await leftPage.routeWebSocket(/.*/, async (socket) => {
+      if (connections.length > 0) await new Promise((resolve) => setTimeout(resolve, 600));
+      connections.push({ page: socket, server: socket.connectToServer() });
+    });
+    await Promise.all([openPlayPage(leftPage), openPlayPage(rightPage)]);
+
+    await Promise.all([
+      leftPage.getByRole("button", { name: "매칭 큐 참가" }).click(),
+      rightPage.getByRole("button", { name: "매칭 큐 참가" }).click()
+    ]);
+    await Promise.all([
+      leftPage.getByText("준비 대기 중").waitFor(),
+      rightPage.getByText("준비 대기 중").waitFor()
+    ]);
+    await Promise.all([
+      leftPage.getByText(rightName, { exact: true }).waitFor(),
+      rightPage.getByText(leftName, { exact: true }).waitFor()
+    ]);
+    await Promise.all([
+      leftPage.getByRole("button", { name: "준비" }).click(),
+      rightPage.getByRole("button", { name: "준비" }).click()
+    ]);
+    await Promise.all([
+      leftPage.getByText("경기 진행 중").waitFor(),
+      rightPage.getByText("경기 진행 중").waitFor()
+    ]);
+
+    const screenshot = path.join(rawDir, "guest-pvp-desktop.png");
+    await leftPage.screenshot({ path: screenshot, fullPage: true });
+    assert.equal(connections.length, 1, "PvP 경기 WebSocket을 하나로 특정하지 못했습니다.");
+    await connections[0].page.close({ code: 1012, reason: "media reconnect" });
+    await leftPage.getByText("재연결 대기 중").waitFor({ timeout: 2_000 });
+    await waitFor(() => connections.length === 2, 5_000, "재연결 WebSocket이 만들어지지 않았습니다.");
+    await leftPage.getByText("경기 진행 중").waitFor({ timeout: 5_000 });
+    await leftPage.waitForTimeout(1_000);
+    outputVideo = path.join(rawDir, "guest-pvp-reconnect.webm");
+    return [screenshot, outputVideo];
+  } finally {
+    await Promise.all([leftContext.close(), rightContext.close()]);
+    if (outputVideo) await leftVideo.saveAs(outputVideo);
   }
 }
 
@@ -83,6 +151,30 @@ async function verifyFiles(files) {
 async function compressPng(input, filename) {
   const output = path.join(draftDir, filename);
   runFfmpeg(["-y", "-i", input, "-frames:v", "1", "-compression_level", "9", output]);
+  return output;
+}
+
+async function compressWebm(input, filename) {
+  const output = path.join(draftDir, filename);
+  runFfmpeg([
+    "-y",
+    "-i",
+    input,
+    "-an",
+    "-vf",
+    "fps=24",
+    "-c:v",
+    "libvpx-vp9",
+    "-crf",
+    "38",
+    "-b:v",
+    "0",
+    "-deadline",
+    "good",
+    "-cpu-used",
+    "2",
+    output
+  ]);
   return output;
 }
 
