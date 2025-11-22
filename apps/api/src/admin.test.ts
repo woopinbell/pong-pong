@@ -53,6 +53,27 @@ describe("admin routes", () => {
     expect(actions.json<{ actions: Array<{ reason: string }> }>().actions[0].reason).toBe("smoke");
     expect(blockedChat.statusCode).toBe(403);
   });
+
+  it("rejects an existing administrator session after the account is banned", async () => {
+    const admin = await repo.getUserByHandle("admin");
+    if (!admin) throw new Error("seed:dev admin was not created");
+    await repo.setUserBan(admin.id, admin.id, true, "운영자 계정 정지 검사");
+
+    const actions = await app.inject({
+      method: "GET",
+      url: "/admin/actions",
+      headers: { cookie: adminCookie }
+    });
+
+    expect(actions.statusCode).toBe(403);
+    expect(actions.json()).toEqual({
+      error: expect.objectContaining({
+        code: "account_suspended",
+        message: expect.any(String),
+        requestId: expect.any(String)
+      })
+    });
+  });
 });
 
 function sessionCookie(response: { headers: Record<string, string | string[] | number | undefined> }): string {
