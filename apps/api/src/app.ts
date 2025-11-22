@@ -517,6 +517,7 @@ async function currentUser(
 async function requireAdmin(repo: AppRepository, request: FastifyRequest): Promise<SessionUser> {
   const user = await currentUser(repo, request);
   if (!user) unauthorized();
+  if (!isActive(user)) suspended();
   if (user.role !== "admin") forbidden();
   return user;
 }
