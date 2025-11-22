@@ -41,6 +41,31 @@ describe("GameHub runtime protection", () => {
     ]);
     socket.terminate();
   });
+
+  it("does not expose repository errors through websocket responses", async () => {
+    const repository = createMemoryRepository();
+    repositories.push(repository);
+    vi.spyOn(repository, "createChatMessage").mockRejectedValue(
+      new Error("select password_hash from users failed: database.internal:5432")
+    );
+    const hub = new GameHub(repository);
+    const socket = new FakeSocket();
+    hub.connect(socket as unknown as WebSocket, {} as IncomingMessage, user());
+
+    socket.receive({ v: 1, type: "chat.send", scope: "lobby", body: "안전한 오류 응답" });
+
+    await expect.poll(() => socket.events().filter((event) => event.type === "error")).toEqual([
+      {
+        v: 1,
+        type: "error",
+        code: "internal_error",
+        message: "메시지를 처리하지 못했습니다."
+      }
+    ]);
+    expect(JSON.stringify(socket.events())).not.toContain("password_hash");
+    expect(JSON.stringify(socket.events())).not.toContain("database.internal");
+    socket.terminate();
+  });
 });
 
 class FakeSocket extends EventEmitter {
