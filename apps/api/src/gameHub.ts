@@ -80,6 +80,8 @@ const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
 const GUEST_RESULT_RETENTION_MS = 2 * 60 * 1_000;
+const INVALID_EVENT_MESSAGE = "올바르지 않은 메시지입니다.";
+const INTERNAL_ERROR_MESSAGE = "메시지를 처리하지 못했습니다.";
 
 export interface DrainResult {
   drained: boolean;
@@ -195,8 +197,19 @@ export class GameHub {
 
   private async receive(client: Client, payload: string): Promise<void> {
     if (this.clients.get(client.id) !== client) return;
+    let event: ReturnType<typeof parseClientEvent>;
     try {
-      const event = parseClientEvent(payload);
+      event = parseClientEvent(payload);
+    } catch {
+      this.send(client, {
+        type: "error",
+        code: "invalid_event",
+        message: INVALID_EVENT_MESSAGE
+      });
+      return;
+    }
+
+    try {
       if (isGuest(client.user) && (event.type === "chat.send" || event.type === "tournament.join")) {
         this.send(client, {
           type: "error",
@@ -225,11 +238,11 @@ export class GameHub {
           this.broadcastAll({ type: "chat.message", message });
         }
       }
-    } catch (error) {
+    } catch {
       this.send(client, {
         type: "error",
-        code: "invalid_event",
-        message: error instanceof Error ? error.message : "메시지를 처리하지 못했습니다."
+        code: "internal_error",
+        message: INTERNAL_ERROR_MESSAGE
       });
     }
   }
@@ -439,11 +452,11 @@ export class GameHub {
   private armAiFallback(entry: QueueEntry, delayMs: number): void {
     clearQueueTimer(entry);
     entry.npcFallbackTimer = setTimeout(() => {
-      this.matchQueuedClientWithNpc(entry).catch((error) => {
+      this.matchQueuedClientWithNpc(entry).catch(() => {
         this.send(entry.client, {
           type: "error",
           code: "internal_error",
-          message: error instanceof Error ? error.message : "AI 상대를 찾지 못했습니다."
+          message: INTERNAL_ERROR_MESSAGE
         });
       });
     }, Math.max(0, delayMs));
