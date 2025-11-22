@@ -17,6 +17,7 @@ const rawFiles = [];
 try {
   rawFiles.push(await captureGuestEntry(browser));
   rawFiles.push(...await capturePvpReconnect(browser));
+  rawFiles.push(...await captureAiFallback(browser));
 } finally {
   await browser.close();
 }
@@ -27,7 +28,9 @@ await mkdir(draftDir, { recursive: true });
 const selectedFiles = [
   await compressPng(rawFiles[0], "guest-entry-desktop.png"),
   await compressPng(rawFiles[1], "guest-pvp-desktop.png"),
-  await compressWebm(rawFiles[2], "guest-pvp-reconnect.webm")
+  await compressWebm(rawFiles[2], "guest-pvp-reconnect.webm"),
+  await compressPng(rawFiles[3], "guest-ai-mobile.png"),
+  await compressWebm(rawFiles[4], "guest-ai-fallback-mobile.webm")
 ];
 await verifyFiles(selectedFiles);
 
@@ -112,6 +115,42 @@ async function capturePvpReconnect(browser) {
   } finally {
     await Promise.all([leftContext.close(), rightContext.close()]);
     if (outputVideo) await leftVideo.saveAs(outputVideo);
+  }
+}
+
+async function captureAiFallback(browser) {
+  const videoDir = path.join(rawDir, "ai-video");
+  await mkdir(videoDir, { recursive: true });
+  const pixel = devices["Pixel 7"];
+  const context = await browser.newContext({
+    ...pixel,
+    baseURL,
+    recordVideo: { dir: videoDir, size: { width: 412, height: 915 } }
+  });
+  const page = await context.newPage();
+  const video = page.video();
+  assert(video, "AI fallback 녹화를 시작하지 못했습니다.");
+
+  let outputVideo;
+  try {
+    await enterAsGuest(page);
+    await openPlayPage(page);
+    const startedAt = Date.now();
+    await page.getByRole("button", { name: "매칭 큐 참가" }).click();
+    await page.getByText("준비 대기 중").waitFor({ timeout: 12_000 });
+    assert(Date.now() - startedAt >= 5_500, "AI fallback이 6초보다 이르게 실행됐습니다.");
+    await page.getByText("연습 AI", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "준비" }).click();
+    await page.getByText("경기 진행 중").waitFor();
+    await page.waitForTimeout(1_000);
+
+    const screenshot = path.join(rawDir, "guest-ai-mobile.png");
+    await page.screenshot({ path: screenshot, fullPage: true });
+    outputVideo = path.join(rawDir, "guest-ai-fallback-mobile.webm");
+    return [screenshot, outputVideo];
+  } finally {
+    await context.close();
+    if (outputVideo) await video.saveAs(outputVideo);
   }
 }
 
