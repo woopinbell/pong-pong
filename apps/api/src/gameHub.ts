@@ -553,7 +553,13 @@ export class GameHub {
     const left = client.user.id === match.leftUserId ? client : opponent;
     const right = left === client ? opponent : client;
     const roomId = this.createRoom(left, right, { ai: false, mode: "tournament", tournamentMatchId: matchId });
-    await this.repo.startTournamentMatch(matchId, roomId);
+    try {
+      await this.repo.startTournamentMatch(matchId, roomId);
+    } catch (error) {
+      const room = this.rooms.get(roomId);
+      if (room) this.abandonRoom(room);
+      throw error;
+    }
   }
 
   private leaveQueue(client: Client): void {
