@@ -5,9 +5,11 @@ import {
   chatResponseSchema,
   dashboardSummarySchema,
   friendResponseSchema,
+  friendsResponseSchema,
   guestAuthResponseSchema,
   leaderboardResponseSchema,
   lobbyResponseSchema,
+  ownProfileResponseSchema,
   profileResponseSchema,
   publicUserResponseSchema,
   tournamentResponseSchema,
@@ -23,6 +25,7 @@ import {
   type LeaderboardEntry,
   type LobbyResponse,
   type MatchSummary,
+  type ProfileUpdateBody,
   type PublicUser,
   type SessionUser,
   type TournamentSummary,
@@ -120,6 +123,10 @@ export async function getDashboard(signal?: AbortSignal): Promise<DashboardSumma
   return apiFetch("/dashboard", dashboardSummarySchema, { signal });
 }
 
+export async function getFriends(signal?: AbortSignal): Promise<FriendSummary[]> {
+  return (await apiFetch("/friends", friendsResponseSchema, { signal })).friends;
+}
+
 export async function getLeaderboard(signal?: AbortSignal): Promise<LeaderboardEntry[]> {
   return (await apiFetch("/leaderboard", leaderboardResponseSchema, { signal })).entries;
 }
@@ -148,6 +155,21 @@ export async function getProfile(
   signal?: AbortSignal
 ): Promise<{ user: PublicUser; recentMatches: MatchSummary[] }> {
   return apiFetch(`/profile/${handle}`, profileResponseSchema, { signal });
+}
+
+export async function getOwnProfile(signal?: AbortSignal): Promise<SessionUser> {
+  return (await apiFetch("/profile/me", ownProfileResponseSchema, { signal })).profile;
+}
+
+export async function updateOwnProfile(
+  input: ProfileUpdateBody,
+  signal?: AbortSignal
+): Promise<SessionUser> {
+  return (await apiFetch("/profile/me", ownProfileResponseSchema, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+    signal
+  })).profile;
 }
 
 export async function requestFriend(handle: string, signal?: AbortSignal): Promise<FriendSummary> {

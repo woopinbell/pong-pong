@@ -8,9 +8,11 @@ import {
   getAdminActions,
   getAdminUsers,
   getDashboard,
+  getFriends,
   getLeaderboard,
   getLobby,
   getMe,
+  getOwnProfile,
   getProfile,
   getTournaments
 } from "./api";
@@ -19,6 +21,7 @@ export const queryKeys = {
   me: () => ["user", "me"] as const,
   lobby: () => ["lobby"] as const,
   dashboard: () => ["dashboard"] as const,
+  ownProfile: () => ["user", "profile"] as const,
   profile: (handle: string) => ["profiles", handle] as const,
   leaderboard: () => ["leaderboard"] as const,
   friends: () => ["friends"] as const,
@@ -31,6 +34,18 @@ export const mutationInvalidations = {
   login: () => [queryKeys.me(), queryKeys.lobby()] as const,
   lobbyChat: () => [queryKeys.lobby()] as const,
   friendRequest: () => [queryKeys.friends()] as const,
+  profileUpdate: (handle: string) => [
+    queryKeys.me(),
+    queryKeys.ownProfile(),
+    queryKeys.profile(handle),
+    queryKeys.lobby(),
+    queryKeys.dashboard(),
+    queryKeys.friends(),
+    queryKeys.leaderboard(),
+    queryKeys.tournaments(),
+    queryKeys.adminUsers(),
+    queryKeys.adminActions()
+  ] as const,
   tournamentChange: () => [queryKeys.tournaments()] as const,
   adminStatus: () => [queryKeys.adminUsers(), queryKeys.adminActions()] as const
 };
@@ -53,10 +68,22 @@ export const dashboardQueryOptions = () => queryOptions({
   staleTime: 10_000
 });
 
+export const ownProfileQueryOptions = () => queryOptions({
+  queryKey: queryKeys.ownProfile(),
+  queryFn: ({ signal }) => getOwnProfile(signal),
+  staleTime: 30_000
+});
+
 export const profileQueryOptions = (handle: string) => queryOptions({
   queryKey: queryKeys.profile(handle),
   queryFn: ({ signal }) => getProfile(handle, signal),
   staleTime: 30_000
+});
+
+export const friendsQueryOptions = () => queryOptions({
+  queryKey: queryKeys.friends(),
+  queryFn: ({ signal }) => getFriends(signal),
+  staleTime: 10_000
 });
 
 export const leaderboardQueryOptions = () => queryOptions({
@@ -99,6 +126,7 @@ export function expireSession(client: QueryClient): void {
   const sessionScopedKeys = [
     queryKeys.lobby(),
     queryKeys.dashboard(),
+    queryKeys.ownProfile(),
     queryKeys.friends(),
     queryKeys.adminUsers(),
     queryKeys.adminActions()
