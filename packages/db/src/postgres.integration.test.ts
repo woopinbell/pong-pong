@@ -447,6 +447,17 @@ describe("PostgreSQL integration", () => {
     });
   });
 
+  it("rejects a tournament start when no match row is updated", async () => {
+    await withIsolatedDatabase(async ({ openRepository }) => {
+      const repository = openRepository();
+
+      await expect(repository.startTournamentMatch(
+        randomUUID(),
+        "missing-tournament-room"
+      )).rejects.toThrow("tournament match not found");
+    });
+  });
+
   it("links concurrent semifinals and creates exactly one final", async () => {
     await withIsolatedDatabase(async ({ openPool, openRepository }) => {
       const repository = openRepository();
