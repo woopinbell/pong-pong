@@ -785,11 +785,13 @@ class PostgresRepository implements AppRepository {
   }
 
   async startTournamentMatch(matchId: string, roomId: string): Promise<void> {
-    await sql`
+    const updated = await sql<{ id: string }>`
       update tournament_matches
       set status = 'running', room_id = ${roomId}, updated_at = now()
       where id = ${matchId} and status in ('ready', 'running')
+      returning id
     `.execute(this.db);
+    if (updated.rows.length !== 1) throw new Error("tournament match not found");
   }
 
   async completeTournamentMatch(input: { tournamentMatchId: string; roomId: string; matchId: string; winnerId: string | null; scoreLeft: number; scoreRight: number }): Promise<TournamentSummary> {
