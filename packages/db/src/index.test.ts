@@ -149,15 +149,31 @@ describe("memory repository", () => {
     await repo.joinTournament(tournament.id, p3.id);
     const full = await repo.joinTournament(tournament.id, p4.id);
     const [semiA, semiB] = full.matches.filter((match) => match.round === "semifinal");
-    const semiMatchA = await repo.createMatch({ mode: "tournament", winnerId: me.id, loserId: p4.id, scoreLeft: 3, scoreRight: 1 });
-    const semiMatchB = await repo.createMatch({ mode: "tournament", winnerId: p2.id, loserId: p3.id, scoreLeft: 3, scoreRight: 2 });
-    await repo.completeTournamentMatch({ tournamentMatchId: semiA.id, roomId: "room-a", matchId: semiMatchA, winnerId: me.id, scoreLeft: 3, scoreRight: 1 });
-    const withFinal = await repo.completeTournamentMatch({ tournamentMatchId: semiB.id, roomId: "room-b", matchId: semiMatchB, winnerId: p2.id, scoreLeft: 3, scoreRight: 2 });
-    const final = withFinal.matches.find((match) => match.round === "final");
+    await repo.finalizeMatch({
+      resultKey: "room:room-a:finished",
+      mode: "tournament",
+      winnerId: me.id,
+      loserId: p4.id,
+      scoreLeft: 3,
+      scoreRight: 1,
+      tournament: { tournamentMatchId: semiA.id, roomId: "room-a" }
+    });
+    await repo.finalizeMatch({
+      resultKey: "room:room-b:finished",
+      mode: "tournament",
+      winnerId: p2.id,
+      loserId: p3.id,
+      scoreLeft: 3,
+      scoreRight: 2,
+      tournament: { tournamentMatchId: semiB.id, roomId: "room-b" }
+    });
+    const withFinal = (await repo.listTournaments()).find((item) => item.id === tournament.id);
+    const final = withFinal?.matches.find((match) => match.round === "final");
 
     expect(friend.status).toBe("pending");
     expect(full.playerCount).toBe(4);
     expect(full.matches.filter((match) => match.round === "semifinal")).toHaveLength(2);
+    expect(withFinal).toBeDefined();
     expect(final?.left?.id).toBe(me.id);
     expect(final?.right?.id).toBe(p2.id);
     expect((await repo.listTournaments())[0].name).toBe("테스트 컵");

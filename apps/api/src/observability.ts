@@ -45,7 +45,6 @@ const REPOSITORY_OPERATIONS = new Set([
   "joinTournament",
   "getTournamentMatch",
   "startTournamentMatch",
-  "completeTournamentMatch",
   "listAdminUsers",
   "listAdminActions",
   "setUserBan"
