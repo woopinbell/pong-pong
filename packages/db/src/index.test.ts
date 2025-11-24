@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { createMemoryRepository } from "./index";
 
 describe("memory repository", () => {
+  it("exposes tournament completion only through finalizeMatch", () => {
+    const repo = createMemoryRepository();
+
+    expect(repo).toHaveProperty("finalizeMatch");
+    expect(repo).not.toHaveProperty("completeTournamentMatch");
+  });
+
   it("seeds rating-banded npc opponents separately from players", async () => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData();
