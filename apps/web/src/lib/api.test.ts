@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { okResponseSchema, type PublicUser, type SessionUser } from "@pong-pong/shared";
+import {
+  okResponseSchema,
+  type FriendSummary,
+  type PublicUser,
+  type SessionUser
+} from "@pong-pong/shared";
 import {
   ApiError,
   SESSION_EXPIRED_EVENT,
@@ -9,9 +14,11 @@ import {
   getAdminActions,
   getAdminUsers,
   getDashboard,
+  getFriends,
   getLeaderboard,
   getLobby,
   getMe,
+  getOwnProfile,
   getProfile,
   getTournaments,
   guestLogin,
@@ -19,7 +26,8 @@ import {
   requestFriend,
   requestWsTicket,
   sendLobbyChat,
-  setUserStatus
+  setUserStatus,
+  updateOwnProfile
 } from "./api";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
@@ -43,6 +51,12 @@ const sessionUser = {
   ...publicUser,
   email: "tester@example.com"
 } satisfies SessionUser;
+
+const friend = {
+  id: ITEM_ID,
+  user: publicUser,
+  status: "accepted"
+} satisfies FriendSummary;
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -233,6 +247,47 @@ describe("API endpoint helpers", () => {
     await expect(getMe()).rejects.toMatchObject({ status: 503, code: "UNAVAILABLE" });
   });
 
+  it("reads the current profile and friend list through their shared response contracts", async () => {
+    const controller = new AbortController();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ profile: sessionUser }))
+      .mockResolvedValueOnce(jsonResponse({ friends: [friend] }));
+
+    await expect(getOwnProfile(controller.signal)).resolves.toEqual(sessionUser);
+    await expect(getFriends(controller.signal)).resolves.toEqual([friend]);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:4000/profile/me",
+      expect.objectContaining({ credentials: "include", signal: controller.signal })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:4000/friends",
+      expect.objectContaining({ credentials: "include", signal: controller.signal })
+    );
+  });
+
+  it("updates only the supplied current-profile fields", async () => {
+    const updated = { ...sessionUser, displayName: "새 이름", avatarKey: "avatar-2" };
+    const controller = new AbortController();
+    fetchMock.mockResolvedValue(jsonResponse({ profile: updated }));
+
+    await expect(updateOwnProfile({
+      displayName: "새 이름",
+      avatarKey: "avatar-2"
+    }, controller.signal)).resolves.toEqual(updated);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://localhost:4000/profile/me");
+    expect(init).toMatchObject({
+      method: "PATCH",
+      credentials: "include",
+      body: JSON.stringify({ displayName: "새 이름", avatarKey: "avatar-2" }),
+      signal: controller.signal
+    });
+  });
+
   it("requests and validates a one-time websocket ticket", async () => {
     const ticketResponse = {
       ticket: "a".repeat(43),
@@ -287,10 +342,13 @@ describe("API endpoint helpers", () => {
     { name: "getLobby", call: () => getLobby() },
     { name: "sendLobbyChat", call: () => sendLobbyChat("안녕하세요") },
     { name: "getDashboard", call: () => getDashboard() },
+    { name: "getFriends", call: () => getFriends() },
     { name: "getLeaderboard", call: () => getLeaderboard() },
     { name: "getTournaments", call: () => getTournaments() },
     { name: "createTournament", call: () => createTournament("주간 컵") },
     { name: "joinTournament", call: () => joinTournament(ITEM_ID) },
+    { name: "getOwnProfile", call: () => getOwnProfile() },
+    { name: "updateOwnProfile", call: () => updateOwnProfile({ displayName: "새 이름" }) },
     { name: "getProfile", call: () => getProfile("tester") },
     { name: "requestFriend", call: () => requestFriend("friend") },
     { name: "getAdminUsers", call: () => getAdminUsers() },

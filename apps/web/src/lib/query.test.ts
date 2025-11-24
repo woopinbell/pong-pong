@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "./api";
 import {
   expireSession,
+  friendsQueryOptions,
   invalidateExactQueries,
   mutationInvalidations,
+  ownProfileQueryOptions,
   queryKeys,
   shouldRetryQuery
 } from "./query";
@@ -14,6 +16,7 @@ describe("query key contract", () => {
     expect(queryKeys.me()).toEqual(["user", "me"]);
     expect(queryKeys.lobby()).toEqual(["lobby"]);
     expect(queryKeys.dashboard()).toEqual(["dashboard"]);
+    expect(queryKeys.ownProfile()).toEqual(["user", "profile"]);
     expect(queryKeys.profile("pong-master")).toEqual(["profiles", "pong-master"]);
     expect(queryKeys.leaderboard()).toEqual(["leaderboard"]);
     expect(queryKeys.friends()).toEqual(["friends"]);
@@ -29,6 +32,18 @@ describe("query key contract", () => {
     ]);
     expect(mutationInvalidations.lobbyChat()).toEqual([queryKeys.lobby()]);
     expect(mutationInvalidations.friendRequest()).toEqual([queryKeys.friends()]);
+    expect(mutationInvalidations.profileUpdate("pong-master")).toEqual([
+      queryKeys.me(),
+      queryKeys.ownProfile(),
+      queryKeys.profile("pong-master"),
+      queryKeys.lobby(),
+      queryKeys.dashboard(),
+      queryKeys.friends(),
+      queryKeys.leaderboard(),
+      queryKeys.tournaments(),
+      queryKeys.adminUsers(),
+      queryKeys.adminActions()
+    ]);
     expect(mutationInvalidations.tournamentChange()).toEqual([
       queryKeys.tournaments()
     ]);
@@ -36,6 +51,11 @@ describe("query key contract", () => {
       queryKeys.adminUsers(),
       queryKeys.adminActions()
     ]);
+  });
+
+  it("connects private profile and friend reads to their scoped cache keys", () => {
+    expect(ownProfileQueryOptions().queryKey).toEqual(queryKeys.ownProfile());
+    expect(friendsQueryOptions().queryKey).toEqual(queryKeys.friends());
   });
 
   it("marks exact mutation keys stale without touching adjacent caches", async () => {
@@ -66,6 +86,7 @@ describe("session expiration", () => {
     client.setQueryData(queryKeys.me(), { id: "user-1" });
     client.setQueryData(queryKeys.lobby(), { me: { id: "user-1" } });
     client.setQueryData(queryKeys.dashboard(), { wins: 2 });
+    client.setQueryData(queryKeys.ownProfile(), { id: "user-1" });
     client.setQueryData(queryKeys.friends(), [{ id: "friend-1" }]);
     client.setQueryData(queryKeys.adminUsers(), [{ id: "user-1" }]);
     client.setQueryData(queryKeys.adminActions(), [{ id: "action-1" }]);
@@ -78,6 +99,7 @@ describe("session expiration", () => {
     expect(client.getQueryData(queryKeys.me())).toBeNull();
     expect(client.getQueryData(queryKeys.lobby())).toBeUndefined();
     expect(client.getQueryData(queryKeys.dashboard())).toBeUndefined();
+    expect(client.getQueryData(queryKeys.ownProfile())).toBeUndefined();
     expect(client.getQueryData(queryKeys.friends())).toBeUndefined();
     expect(client.getQueryData(queryKeys.adminUsers())).toBeUndefined();
     expect(client.getQueryData(queryKeys.adminActions())).toBeUndefined();
