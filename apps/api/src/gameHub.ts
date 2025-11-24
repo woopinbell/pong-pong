@@ -73,10 +73,12 @@ type Room = {
   reconnectTimer: NodeJS.Timeout | null;
   disconnectedUsers: Partial<Record<PlayerSide, string>>;
   guest: boolean;
+  snapshotDeliverySlot: number;
 };
 
 const MAX_MATCHMAKING_RATING_DIFFERENCE = 200;
 const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
+const SNAPSHOT_DELIVERY_DIVISOR = 2;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
 const GUEST_RESULT_RETENTION_MS = 2 * 60 * 1_000;
@@ -103,6 +105,7 @@ export interface GameHubObserver {
   matchFinalized?(context: {
     outcome: "success" | "failure";
     persistence: "database" | "memory";
+    created: boolean | null;
     roomId: string;
     matchId: string | null;
     userIds: string[];
@@ -124,6 +127,7 @@ export class GameHub {
   private readonly waitSamples: number[] = [];
   private readonly inputGate = new InputGate();
   private readonly roomScheduler = new SharedRoomScheduler();
+  private nextSnapshotDeliverySlot = 0;
   private readonly recentGuestResults = new Map<string, {
     result: GameFinished;
     expiresAtMs: number;
@@ -674,6 +678,9 @@ export class GameHub {
     const rightPlayer = right?.user ?? npcUser;
     const simulation = PongSimulation.initialState();
     const session = new RoomSession();
+    const snapshotDeliverySlot = this.nextSnapshotDeliverySlot;
+    this.nextSnapshotDeliverySlot =
+      (this.nextSnapshotDeliverySlot + 1) % SNAPSHOT_DELIVERY_DIVISOR;
     if (options.ai) session.markReady("right");
     const room: Room = {
       id: roomId,
@@ -690,6 +697,7 @@ export class GameHub {
       reconnectTimer: null,
       disconnectedUsers: {},
       guest: isGuest(left.user),
+      snapshotDeliverySlot,
       snapshot: {
         roomId,
         tick: 0,
@@ -823,7 +831,11 @@ export class GameHub {
       right: rightDirection
     }, SIMULATION_TIMESTEP_MS);
     syncSnapshot(room);
-    this.broadcastSnapshot(room);
+    if (
+      (room.simulation.tick + room.snapshotDeliverySlot) % SNAPSHOT_DELIVERY_DIVISOR === 0
+    ) {
+      this.broadcastSnapshot(room);
+    }
 
     if (room.simulation.phase === "finished" && room.simulation.winnerSide) {
       this.finishRoom(room, room.simulation.winnerSide).catch(() => undefined);
@@ -864,6 +876,7 @@ export class GameHub {
         this.observer.matchFinalized?.({
           outcome: "success",
           persistence: "memory",
+          created: null,
           roomId: room.id,
           matchId: null,
           userIds: roomUserIds(room)
@@ -896,6 +909,7 @@ export class GameHub {
       this.observer.matchFinalized?.({
         outcome: "failure",
         persistence: "database",
+        created: null,
         roomId: room.id,
         matchId: null,
         userIds: roomUserIds(room)
@@ -906,6 +920,7 @@ export class GameHub {
       this.observer.matchFinalized?.({
         outcome: "success",
         persistence: "database",
+        created: finalized.created,
         roomId: room.id,
         matchId: finalized.matchId,
         userIds: roomUserIds(room)

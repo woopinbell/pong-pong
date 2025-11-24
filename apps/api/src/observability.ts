@@ -108,6 +108,11 @@ export class ApiMetrics {
     labelNames: ["persistence", "outcome"] as const,
     registers: [this.registry]
   });
+  private readonly matchFinalizationDuplicates = new Counter({
+    name: "pong_pong_api_match_finalization_duplicates_total",
+    help: "Match finalizations that returned an existing persisted result",
+    registers: [this.registry]
+  });
   private readonly reconnects = new Counter({
     name: "pong_pong_api_reconnects_total",
     help: "Websocket room reconnection outcomes",
@@ -167,8 +172,15 @@ export class ApiMetrics {
     this.snapshotDrops.inc({ reason });
   }
 
-  recordFinalization(persistence: "database" | "memory", outcome: "success" | "failure"): void {
+  recordFinalization(
+    persistence: "database" | "memory",
+    outcome: "success" | "failure",
+    created: boolean | null
+  ): void {
     this.matchFinalizations.inc({ persistence, outcome });
+    if (persistence === "database" && outcome === "success" && created === false) {
+      this.matchFinalizationDuplicates.inc();
+    }
   }
 
   recordReconnect(outcome: "success" | "expired"): void {

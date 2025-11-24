@@ -75,7 +75,7 @@ export function buildApp({
       app.log.info(context, "game connection recovery recorded");
     },
     matchFinalized: (context) => {
-      metrics.recordFinalization(context.persistence, context.outcome);
+      metrics.recordFinalization(context.persistence, context.outcome, context.created);
       const level = context.outcome === "success" ? "info" : "warn";
       app.log[level](context, "match finalization recorded");
     },
