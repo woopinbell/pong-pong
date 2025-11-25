@@ -40,19 +40,35 @@ export function teardown() {
   if (response.status !== 200 || typeof response.body !== "string") {
     fail(`API metrics failed with ${response.status}`);
   }
-  const match = response.body.match(
-    /^pong_pong_api_event_loop_lag_p95_seconds\s+([0-9.eE+-]+)$/m
+  const eventLoopLagSeconds = readPrometheusSample(
+    response.body,
+    "pong_pong_api_event_loop_lag_p95_seconds"
   );
-  const seconds = Number(match?.[1]);
-  if (!Number.isFinite(seconds) || seconds < 0) {
+  if (eventLoopLagSeconds === null || eventLoopLagSeconds < 0) {
     fail("API event-loop p95 metric is missing or invalid");
   }
-  eventLoopLagP95.add(seconds * 1_000);
+  eventLoopLagP95.add(eventLoopLagSeconds * 1_000);
+
+  finalizeResults.add(readPrometheusSample(
+    response.body,
+    "pong_pong_api_match_finalizations_total",
+    { persistence: "database", outcome: "success" }
+  ) ?? 0);
+  finalizeFailures.add(readPrometheusSample(
+    response.body,
+    "pong_pong_api_match_finalizations_total",
+    { persistence: "database", outcome: "failure" }
+  ) ?? 0);
+  finalizeDuplicates.add(readPrometheusSample(
+    response.body,
+    "pong_pong_api_match_finalization_duplicates_total"
+  ) ?? 0);
 }
 
 export default function () {
   const vuId = exec.vu.idInTest;
   const player = vuId <= profile.playerConnections;
+  const reconnectDelayMs = player ? reconnectDelayFor(vuId) : 0;
   const finishedMatchIds = new Set();
   const finishedRoomIds = new Set();
   finalizeFailures.add(0);
@@ -75,6 +91,7 @@ export default function () {
       ticket: initialTicket,
       phase: "initial",
       player,
+      reconnectDelayMs,
       expectedRoomId: null,
       finishedMatchIds,
       finishedRoomIds
@@ -103,6 +120,7 @@ export default function () {
       ticket: reconnectTicket,
       phase: "reconnect",
       player: true,
+      reconnectDelayMs: 0,
       expectedRoomId: initial.roomId,
       finishedMatchIds,
       finishedRoomIds
@@ -144,7 +162,15 @@ function issueTicket() {
   }
 }
 
-function connectSession({ ticket, phase, player, expectedRoomId, finishedMatchIds, finishedRoomIds }) {
+function connectSession({
+  ticket,
+  phase,
+  player,
+  reconnectDelayMs,
+  expectedRoomId,
+  finishedMatchIds,
+  finishedRoomIds
+}) {
   const result = {
     connected: false,
     recovered: expectedRoomId === null,
@@ -192,10 +218,6 @@ function connectSession({ ticket, phase, player, expectedRoomId, finishedMatchId
           result.side = event.side;
           if (expectedRoomId !== null && event.roomId === expectedRoomId) result.recovered = true;
           socket.send(JSON.stringify({ v: 1, type: "game.ready", roomId: event.roomId }));
-          if (!reconnectCloseArmed && phase === "initial") {
-            reconnectCloseArmed = true;
-            socket.setTimeout(() => socket.close(), profile.playerReconnectDelayMs);
-          }
           socket.setInterval(() => {
             inputSeq += 1;
             const direction = inputSeq % 30 < 10 ? -1 : inputSeq % 30 < 20 ? 1 : 0;
@@ -213,6 +235,15 @@ function connectSession({ ticket, phase, player, expectedRoomId, finishedMatchId
         if (event.type === "game.snapshot") {
           const snapshot = event.snapshot;
           if (expectedRoomId !== null && snapshot.roomId === expectedRoomId) result.recovered = true;
+          if (
+            !reconnectCloseArmed
+            && phase === "initial"
+            && player
+            && snapshot.state.phase === "playing"
+          ) {
+            reconnectCloseArmed = true;
+            socket.setTimeout(() => socket.close(), reconnectDelayMs);
+          }
           snapshotDelay.add(Math.max(0, Date.now() - snapshot.serverTimeMs));
           if (lastSequence !== null && snapshot.sequence > lastSequence) {
             const missed = snapshot.sequence - lastSequence - 1;
@@ -243,7 +274,6 @@ function connectSession({ ticket, phase, player, expectedRoomId, finishedMatchId
           } else {
             finishedMatchIds.add(matchId);
             finishedRoomIds.add(roomId);
-            finalizeResults.add(1);
           }
         }
       });
@@ -256,4 +286,31 @@ function connectSession({ ticket, phase, player, expectedRoomId, finishedMatchId
 
   result.connected = result.connected && response?.status === 101;
   return result;
+}
+
+function reconnectDelayFor(vuId) {
+  if (profile.playerReconnectStaggerMs === 0) return profile.playerReconnectDelayMs;
+  const playerIndex = (vuId - 1) % profile.playerConnections;
+  const staggerMs = Math.floor(
+    playerIndex * profile.playerReconnectStaggerMs / profile.playerConnections
+  );
+  return profile.playerReconnectDelayMs + staggerMs;
+}
+
+function readPrometheusSample(body, metricName, expectedLabels = {}) {
+  for (const line of body.split("\n")) {
+    if (!line.startsWith(metricName)) continue;
+    const sample = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([0-9.eE+-]+)$/);
+    if (!sample || sample[1] !== metricName) continue;
+
+    const labels = {};
+    for (const label of (sample[2] ?? "").matchAll(/([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"/g)) {
+      labels[label[1]] = label[2];
+    }
+    if (Object.entries(expectedLabels).some(([name, value]) => labels[name] !== value)) continue;
+
+    const value = Number(sample[3]);
+    return Number.isFinite(value) ? value : null;
+  }
+  return null;
 }

@@ -20,7 +20,12 @@ export function createLoadProfile(environment = {}) {
   const playerReconnectDelayMs = positiveInteger(
     "PLAYER_RECONNECT_DELAY_MS",
     environment.PLAYER_RECONNECT_DELAY_MS,
-    10_000
+    2_000
+  );
+  const playerReconnectStaggerMs = nonNegativeInteger(
+    "PLAYER_RECONNECT_STAGGER_MS",
+    environment.PLAYER_RECONNECT_STAGGER_MS,
+    5_000
   );
   const reconnectedHoldMs = positiveInteger(
     "RECONNECTED_HOLD_MS",
@@ -36,6 +41,7 @@ export function createLoadProfile(environment = {}) {
     minimumSuccessfulConnections,
     initialHoldMs,
     playerReconnectDelayMs,
+    playerReconnectStaggerMs,
     reconnectedHoldMs,
     options: {
       discardResponseBodies: true,
@@ -68,6 +74,14 @@ function positiveInteger(name, rawValue, fallback) {
   const value = rawValue === undefined || rawValue === "" ? fallback : Number(rawValue);
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new RangeError(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function nonNegativeInteger(name, rawValue, fallback) {
+  const value = rawValue === undefined || rawValue === "" ? fallback : Number(rawValue);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative integer`);
   }
   return value;
 }
