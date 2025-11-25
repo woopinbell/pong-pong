@@ -13,6 +13,7 @@
     "test": "pnpm unit",
     "unit": "pnpm -r test",
     "postgres-integration": "pnpm --filter @pong-pong/db postgres-integration",
+    "load:faults": "node tests/load/fault-scenario.mjs",
     "smoke:http": "node tests/smoke-api.mjs",
     "smoke:ws": "node tests/smoke-ws.mjs",
     "verify:build": "node tests/build-artifacts.mjs",
