@@ -11,6 +11,8 @@ test("default profile attempts 500 connections and observes 50 rooms", () => {
   assert.equal(profile.rooms, 50);
   assert.equal(profile.playerConnections, 100);
   assert.equal(profile.minimumSuccessfulConnections, 495);
+  assert.equal(profile.playerReconnectDelayMs, 2_000);
+  assert.equal(profile.playerReconnectStaggerMs, 5_000);
   assert.deepEqual(profile.options.scenarios.pong, {
     executor: "per-vu-iterations",
     vus: 500,
@@ -68,6 +70,17 @@ test("k6 scenario records every required service-level indicator", async () => {
   assert.match(source, /serverTimeMs/);
   assert.match(source, /METRICS_BASE_URL/);
   assert.match(source, /pong_pong_api_event_loop_lag_p95_seconds/);
+  assert.match(source, /snapshot\.state\.phase === "playing"/);
+  assert.match(source, /playerReconnectStaggerMs/);
+  assert.match(source, /pong_pong_api_match_finalizations_total/);
+  assert.match(source, /pong_pong_api_match_finalization_duplicates_total/);
+  assert.equal((source.match(/finalizeResults\.add/g) ?? []).length, 1);
+});
+
+test("reconnect staggering can be disabled explicitly for a focused run", () => {
+  const profile = createLoadProfile({ PLAYER_RECONNECT_STAGGER_MS: "0" });
+
+  assert.equal(profile.playerReconnectStaggerMs, 0);
 });
 
 test("Toxiproxy plan separates PostgreSQL and edge failure paths", () => {

@@ -83,7 +83,7 @@ describe("GameHub connection recovery", () => {
   });
 
   it("finalizes one forfeit when the reserved side does not reconnect", async () => {
-    const { hub, finalizeMatch } = setup();
+    const { hub, finalizeMatch, matchFinalized } = setup();
     const leftUser = player("left-user", "왼쪽 사용자");
     const rightUser = player("right-user", "오른쪽 사용자");
     const left = connect(hub, leftUser);
@@ -119,6 +119,13 @@ describe("GameHub connection recovery", () => {
         result: expect.objectContaining({ roomId: matched.roomId, winnerSide: "right" })
       })
     );
+    expect(matchFinalized).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "success",
+        persistence: "database",
+        created: true
+      })
+    );
     expect(hub.scheduledRoomCount).toBe(0);
 
     await vi.advanceTimersByTimeAsync(60_000);
@@ -128,12 +135,17 @@ describe("GameHub connection recovery", () => {
   function setup() {
     const repository = createMemoryRepository();
     repositories.push(repository);
+    const matchFinalized = vi.fn();
     const finalizeMatch = vi.spyOn(repository, "finalizeMatch").mockResolvedValue({
       matchId: "forfeit-match",
       resultKey: "forfeit-result",
       created: true
     });
-    return { hub: new GameHub(repository), finalizeMatch };
+    return {
+      hub: new GameHub(repository, { matchFinalized }),
+      finalizeMatch,
+      matchFinalized
+    };
   }
 
   function connect(hub: GameHub, user: SessionUser): FakeSocket {
