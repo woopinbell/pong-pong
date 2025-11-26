@@ -1,10 +1,24 @@
-import { createMemoryRepository, createPostgresRepository } from "@pong-pong/db";
+import {
+  createMemoryRepository,
+  createPostgresRepository,
+  type PostgresPoolErrorEvent
+} from "@pong-pong/db";
 import { buildApp } from "./app.js";
 import { readEnv } from "./env.js";
 import { installGracefulShutdown } from "./gracefulShutdown.js";
 
 const env = readEnv();
-const repo = env.databaseUrl ? createPostgresRepository(env.databaseUrl) : createMemoryRepository();
+const earlyPoolErrors: PostgresPoolErrorEvent[] = [];
+let reportPoolError = (event: PostgresPoolErrorEvent) => {
+  earlyPoolErrors.push(event);
+};
+const repo = env.databaseUrl
+  ? createPostgresRepository(env.databaseUrl, {
+      onPoolError: (event) => {
+        reportPoolError(event);
+      }
+    })
+  : createMemoryRepository();
 
 const app = buildApp({
   repo,
@@ -13,6 +27,12 @@ const app = buildApp({
   sessionSecret: env.sessionSecret,
   trustProxy: env.trustProxy
 });
+reportPoolError = (event) => {
+  app.log.error(event, "PostgreSQL idle client connection failed");
+};
+for (const event of earlyPoolErrors.splice(0)) {
+  reportPoolError(event);
+}
 app.addHook("onClose", async () => {
   await repo.close();
 });

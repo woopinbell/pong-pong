@@ -40,8 +40,13 @@ import type {
   UserRow
 } from "./schema.js";
 import { inspectMigrationSet } from "./migrator.js";
+import {
+  installPostgresPoolErrorHandler,
+  type PostgresPoolErrorReporter
+} from "./poolError.js";
 
 export type { Database } from "./schema.js";
+export type { PostgresPoolErrorEvent, PostgresPoolErrorReporter } from "./poolError.js";
 
 type MemoryFriendship = {
   id: string;
@@ -166,8 +171,16 @@ export interface AppRepository extends MatchResultRepository {
   setUserBan(actorId: string, targetUserId: string, banned: boolean, reason: string): Promise<PublicUser>;
 }
 
-export function createPostgresRepository(databaseUrl: string): AppRepository {
+export interface PostgresRepositoryOptions {
+  onPoolError?: PostgresPoolErrorReporter;
+}
+
+export function createPostgresRepository(
+  databaseUrl: string,
+  options: PostgresRepositoryOptions = {}
+): AppRepository {
   const pool = new Pool({ connectionString: databaseUrl });
+  installPostgresPoolErrorHandler(pool, options.onPoolError);
   const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
   return new PostgresRepository(db, pool);
 }
