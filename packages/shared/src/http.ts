@@ -183,6 +183,71 @@ export const adminStatusBodySchema = z.object({
   reason: z.string().trim().min(1).max(240).optional()
 }).strict();
 
+function defineHttpRequestContract<
+  Params extends z.ZodTypeAny,
+  Query extends z.ZodTypeAny,
+  Body extends z.ZodTypeAny
+>(params: Params, query: Query, body: Body) {
+  return { params, query, body } as const;
+}
+
+const emptyHttpRequestContract = defineHttpRequestContract(
+  emptyParamsSchema,
+  emptyParamsSchema,
+  emptyParamsSchema
+);
+const idHttpRequestContract = defineHttpRequestContract(
+  idParamsSchema,
+  emptyParamsSchema,
+  emptyParamsSchema
+);
+
+export const jsonHttpRequestContracts = {
+  health: emptyHttpRequestContract,
+  healthLive: emptyHttpRequestContract,
+  healthReady: emptyHttpRequestContract,
+  devLogin: defineHttpRequestContract(emptyParamsSchema, emptyParamsSchema, devLoginBodySchema),
+  guestLogin: emptyHttpRequestContract,
+  logout: emptyHttpRequestContract,
+  wsTicket: emptyHttpRequestContract,
+  me: emptyHttpRequestContract,
+  authMe: emptyHttpRequestContract,
+  userById: idHttpRequestContract,
+  lobby: emptyHttpRequestContract,
+  lobbyChat: defineHttpRequestContract(emptyParamsSchema, emptyParamsSchema, chatBodySchema),
+  leaderboard: emptyHttpRequestContract,
+  dashboard: emptyHttpRequestContract,
+  profileByHandle: defineHttpRequestContract(
+    handleParamsSchema,
+    emptyParamsSchema,
+    emptyParamsSchema
+  ),
+  ownProfile: emptyHttpRequestContract,
+  updateOwnProfile: defineHttpRequestContract(
+    emptyParamsSchema,
+    emptyParamsSchema,
+    profileUpdateBodySchema
+  ),
+  friends: emptyHttpRequestContract,
+  requestFriend: defineHttpRequestContract(
+    emptyParamsSchema,
+    emptyParamsSchema,
+    friendRequestBodySchema
+  ),
+  acceptFriend: idHttpRequestContract,
+  tournaments: emptyHttpRequestContract,
+  createTournament: defineHttpRequestContract(
+    emptyParamsSchema,
+    emptyParamsSchema,
+    tournamentCreateBodySchema
+  ),
+  joinTournament: idHttpRequestContract,
+  adminUsers: emptyHttpRequestContract,
+  adminActions: emptyHttpRequestContract,
+  adminBan: defineHttpRequestContract(idParamsSchema, emptyParamsSchema, adminBanBodySchema),
+  adminStatus: defineHttpRequestContract(idParamsSchema, emptyParamsSchema, adminStatusBodySchema)
+} as const;
+
 export const wsTicketSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 export const wsHandshakeQuerySchema = z.object({
   ticket: wsTicketSchema,
