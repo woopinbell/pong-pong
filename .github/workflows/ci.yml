@@ -138,7 +138,7 @@ jobs:
           }
           trap cleanup EXIT
 
-          for attempt in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:4000/health/ready >/dev/null; then
               break
             fi
@@ -146,7 +146,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:4000/health/ready >/dev/null
 
-          for attempt in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3000 >/dev/null; then
               break
             fi
@@ -157,3 +157,71 @@ jobs:
           pnpm smoke:http
           pnpm smoke:ws
           pnpm e2e
+
+  guest-demo-browser:
+    name: Guest demo browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_MODE: demo
+      E2E_APP_MODE: demo
+      E2E_BASE_URL: http://localhost:3000
+      NEXT_PUBLIC_APP_MODE: demo
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+      SESSION_SECRET: ci-guest-demo-session-secret-32-bytes
+      LOG_LEVEL: warn
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build demo processes
+        run: pnpm build
+
+      - name: Run tests/e2e/guest-demo.spec.ts
+        run: |
+          set -euo pipefail
+          node apps/api/dist/index.js >/tmp/pong-demo-api.log 2>&1 &
+          API_PID=$!
+          pnpm --filter @pong-pong/web start >/tmp/pong-demo-web.log 2>&1 &
+          WEB_PID=$!
+          cleanup() {
+            kill "$API_PID" "$WEB_PID" 2>/dev/null || true
+            wait "$API_PID" "$WEB_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://localhost:4000/health/ready >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://localhost:4000/health/ready >/dev/null
+
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://localhost:3000 >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://localhost:3000 >/dev/null
+
+          pnpm e2e:guest-demo
