@@ -9,7 +9,7 @@ import {
 describe("LatestSnapshotBuffer", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("keeps only the newest snapshot while a send is in flight", () => {
+  it("sends snapshots while a send callback is in flight", () => {
     const socket = fakeSocket();
     const buffer = new LatestSnapshotBuffer(socket);
 
@@ -17,9 +17,9 @@ describe("LatestSnapshotBuffer", () => {
     buffer.enqueue("snapshot-2");
     buffer.enqueue("snapshot-3");
 
-    expect(socket.sent).toEqual(["snapshot-1"]);
+    expect(socket.sent).toEqual(["snapshot-1", "snapshot-2", "snapshot-3"]);
     socket.completeSend();
-    expect(socket.sent).toEqual(["snapshot-1", "snapshot-3"]);
+    expect(socket.sent).toEqual(["snapshot-1", "snapshot-2", "snapshot-3"]);
     socket.completeSend();
     buffer.close();
   });

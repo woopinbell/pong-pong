@@ -29,7 +29,6 @@ export class LatestSnapshotBuffer {
   private readonly onDelivered: (delayMs: number) => void;
   private readonly onDropped: (reason: SnapshotDropReason) => void;
   private pendingSnapshot: PendingSnapshot | null = null;
-  private sending = false;
   private congestionStartedAtMs: number | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -79,33 +78,23 @@ export class LatestSnapshotBuffer {
     }
 
     this.congestionStartedAtMs = null;
-    if (this.sending) {
-      this.armRetry();
-      return;
-    }
-
     const snapshot = this.pendingSnapshot;
     if (snapshot === null) return;
     this.pendingSnapshot = null;
-    this.sending = true;
     try {
       this.socket.send(snapshot.payload, (error) => {
-        this.sending = false;
         if (error) {
           this.onDropped("connection_closed");
           this.terminate("connection_closed");
           return;
         }
         this.onDelivered(Math.max(0, this.now() - snapshot.enqueuedAtMs));
-        this.drain();
       });
     } catch {
-      this.sending = false;
       this.onDropped("connection_closed");
       this.terminate("connection_closed");
       return;
     }
-    if (this.sending || this.pendingSnapshot !== null) this.armRetry();
   }
 
   private armRetry(): void {
