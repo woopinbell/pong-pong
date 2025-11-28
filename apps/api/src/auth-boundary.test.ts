@@ -63,7 +63,8 @@ describe("authentication boundary", () => {
 
     expect(cookieResponse.statusCode).toBe(200);
     expectApiError(authorizationResponse, 401);
-    expectApiError(queryResponse, 401);
+    expectApiError(queryResponse, 400);
+    expect(queryResponse.json<{ error: { code: string } }>().error.code).toBe("validation_error");
   });
 
   it("does not grant administrator privileges from the dev-login handle", async () => {

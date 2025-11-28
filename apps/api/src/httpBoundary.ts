@@ -25,10 +25,25 @@ export function parseInput<T>(schema: ZodType<T>, input: unknown): T {
   }
   throw new ApiHttpError(
     400,
-    "validation_failed",
+    "validation_error",
     "입력값을 확인해주세요.",
     Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined
   );
+}
+
+export function parseHttpRequest<Params, Query, Body>(
+  contract: {
+    params: ZodType<Params>;
+    query: ZodType<Query>;
+    body: ZodType<Body>;
+  },
+  request: FastifyRequest
+): { params: Params; query: Query; body: Body } {
+  return {
+    params: parseInput(contract.params, request.params ?? {}),
+    query: parseInput(contract.query, request.query ?? {}),
+    body: parseInput(contract.body, request.body ?? {})
+  };
 }
 
 export function parseOutput<T>(schema: ZodType<T>, output: unknown): T {

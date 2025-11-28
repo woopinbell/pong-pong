@@ -12,7 +12,7 @@ import {
   forbidden,
   installHttpErrorBoundary,
   notFound,
-  parseInput,
+  parseHttpRequest,
   parseOutput,
   suspended,
   unauthorized
@@ -193,17 +193,24 @@ export function buildApp({
     });
   });
 
-  app.get("/health", async () => parseOutput(http.healthResponseSchema, {
-    ok: true,
-    service: "pong-pong-api"
-  }));
+  app.get("/health", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.health, request);
+    return parseOutput(http.healthResponseSchema, {
+      ok: true,
+      service: "pong-pong-api"
+    });
+  });
 
-  app.get("/health/live", async () => parseOutput(http.liveHealthResponseSchema, {
-    status: "ok",
-    service: "pong-pong-api"
-  }));
+  app.get("/health/live", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.healthLive, request);
+    return parseOutput(http.liveHealthResponseSchema, {
+      status: "ok",
+      service: "pong-pong-api"
+    });
+  });
 
   app.get("/health/ready", async (request, reply) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.healthReady, request);
     const startedAt = performance.now();
     try {
       const repository = await repo.checkReadiness();
@@ -244,7 +251,7 @@ export function buildApp({
 
   if (appMode === "development" || appMode === "test") {
     app.post("/auth/dev-login", async (request, reply) => {
-      const body = parseInput(http.devLoginBodySchema, request.body);
+      const { body } = parseHttpRequest(http.jsonHttpRequestContracts.devLogin, request);
       const user = await repo.upsertDevUser(body);
       const token = await repo.createSession(user.id);
       reply.setCookie("pp_session", token, {
@@ -260,7 +267,7 @@ export function buildApp({
 
   if (appMode === "demo" && guests) {
     app.post("/auth/guest", async (request, reply) => {
-      parseInput(http.emptyParamsSchema, request.body ?? {});
+      parseHttpRequest(http.jsonHttpRequestContracts.guestLogin, request);
       try {
         const session = guests.createSession(request.ip);
         reply.setCookie("pp_guest", session.cookieValue, {
@@ -285,6 +292,7 @@ export function buildApp({
   }
 
   app.post("/auth/logout", async (request, reply) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.logout, request);
     if (!isGuestSession(await getCurrentUser(request))) {
       await repo.deleteSession(readSessionToken(request));
     }
@@ -294,7 +302,7 @@ export function buildApp({
   });
 
   app.post("/auth/ws-ticket", async (request) => {
-    parseInput(http.emptyParamsSchema, request.body ?? {});
+    parseHttpRequest(http.jsonHttpRequestContracts.wsTicket, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     if (!isActive(user)) suspended();
@@ -325,26 +333,29 @@ export function buildApp({
   });
 
   app.get("/me", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.me, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     return parseOutput(http.userResponseSchema, { user });
   });
 
   app.get("/auth/me", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.authMe, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     return parseOutput(http.userResponseSchema, { user });
   });
 
   app.get("/users/:id", async (request) => {
+    const { params: { id } } = parseHttpRequest(http.jsonHttpRequestContracts.userById, request);
     if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
-    const { id } = parseInput(http.idParamsSchema, request.params);
     const user = await repo.getUserById(id);
     if (!user) notFound("사용자를 찾을 수 없습니다.");
     return parseOutput(http.publicUserResponseSchema, { user });
   });
 
   app.get("/lobby", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.lobby, request);
     const user = await getCurrentUser(request);
     const guest = isGuestSession(user);
     return parseOutput(http.lobbyResponseSchema, {
@@ -357,11 +368,11 @@ export function buildApp({
   });
 
   app.post("/chat/lobby", async (request) => {
+    const { body } = parseHttpRequest(http.jsonHttpRequestContracts.lobbyChat, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
     if (!isActive(user)) suspended();
-    const body = parseInput(http.chatBodySchema, request.body);
     return parseOutput(http.chatResponseSchema, {
       message: await repo.createChatMessage({
         scope: "lobby",
@@ -372,12 +383,14 @@ export function buildApp({
     });
   });
 
-  app.get("/leaderboard", async () => {
+  app.get("/leaderboard", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.leaderboard, request);
     if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
     return parseOutput(http.leaderboardResponseSchema, { entries: await repo.listLeaderboard() });
   });
 
   app.get("/dashboard", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.dashboard, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
@@ -385,8 +398,11 @@ export function buildApp({
   });
 
   app.get("/profile/:handle", async (request) => {
+    const { params: { handle } } = parseHttpRequest(
+      http.jsonHttpRequestContracts.profileByHandle,
+      request
+    );
     if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
-    const { handle } = parseInput(http.handleParamsSchema, request.params);
     const user = await repo.getUserByHandle(handle);
     if (!user) notFound("프로필을 찾을 수 없습니다.");
     return parseOutput(http.profileResponseSchema, {
@@ -396,6 +412,7 @@ export function buildApp({
   });
 
   app.get("/profile/me", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.ownProfile, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
@@ -403,16 +420,17 @@ export function buildApp({
   });
 
   app.patch("/profile/me", async (request) => {
+    const { body } = parseHttpRequest(http.jsonHttpRequestContracts.updateOwnProfile, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
-    const body = parseInput(http.profileUpdateBodySchema, request.body);
     return parseOutput(http.ownProfileResponseSchema, {
       profile: await repo.updateProfile(user.id, body)
     });
   });
 
   app.get("/friends", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.friends, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
@@ -420,11 +438,11 @@ export function buildApp({
   });
 
   const requestFriend = async (request: FastifyRequest) => {
+    const { body } = parseHttpRequest(http.jsonHttpRequestContracts.requestFriend, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
     if (!isActive(user)) suspended();
-    const body = parseInput(http.friendRequestBodySchema, request.body);
     return parseOutput(http.friendResponseSchema, {
       friend: await repo.requestFriend(user.id, body.handle)
     });
@@ -434,62 +452,75 @@ export function buildApp({
   app.post("/friends", requestFriend);
 
   app.post("/friends/:id/accept", async (request) => {
+    const { params: { id } } = parseHttpRequest(
+      http.jsonHttpRequestContracts.acceptFriend,
+      request
+    );
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
-    const { id } = parseInput(http.idParamsSchema, request.params);
     return parseOutput(http.friendResponseSchema, { friend: await repo.acceptFriend(user.id, id) });
   });
 
-  app.get("/tournaments", async () => {
+  app.get("/tournaments", async (request) => {
+    parseHttpRequest(http.jsonHttpRequestContracts.tournaments, request);
     if (appMode === "demo") notFound("데모 모드에서는 제공하지 않는 기능입니다.");
     return parseOutput(http.tournamentsResponseSchema, { tournaments: await repo.listTournaments() });
   });
 
   app.post("/tournaments", async (request) => {
+    const { body } = parseHttpRequest(http.jsonHttpRequestContracts.createTournament, request);
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
     if (!isActive(user)) suspended();
-    const body = parseInput(http.tournamentCreateBodySchema, request.body);
     return parseOutput(http.tournamentResponseSchema, {
       tournament: await repo.createTournament({ name: body.name, createdBy: user.id })
     });
   });
 
   app.post("/tournaments/:id/join", async (request) => {
+    const { params: { id } } = parseHttpRequest(
+      http.jsonHttpRequestContracts.joinTournament,
+      request
+    );
     const user = await getCurrentUser(request);
     if (!user) unauthorized();
     requireRegistered(user);
     if (!isActive(user)) suspended();
-    const { id } = parseInput(http.idParamsSchema, request.params);
     return parseOutput(http.tournamentResponseSchema, { tournament: await repo.joinTournament(id, user.id) });
   });
 
   if (appMode !== "demo") {
     app.get("/admin/users", async (request) => {
+      parseHttpRequest(http.jsonHttpRequestContracts.adminUsers, request);
       const user = await requireAdmin(repo, request);
       return parseOutput(http.adminUsersResponseSchema, { users: await repo.listAdminUsers() });
     });
 
     app.get("/admin/actions", async (request) => {
+      parseHttpRequest(http.jsonHttpRequestContracts.adminActions, request);
       await requireAdmin(repo, request);
       return parseOutput(http.adminActionsResponseSchema, { actions: await repo.listAdminActions() });
     });
 
     app.post("/admin/users/:id/ban", async (request) => {
+      const {
+        params: { id },
+        body
+      } = parseHttpRequest(http.jsonHttpRequestContracts.adminBan, request);
       const user = await requireAdmin(repo, request);
-      const { id } = parseInput(http.idParamsSchema, request.params);
-      const body = parseInput(http.adminBanBodySchema, request.body ?? {});
       return parseOutput(http.publicUserResponseSchema, {
         user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review")
       });
     });
 
     app.patch("/admin/users/:id/status", async (request) => {
+      const {
+        params: { id },
+        body
+      } = parseHttpRequest(http.jsonHttpRequestContracts.adminStatus, request);
       const user = await requireAdmin(repo, request);
-      const { id } = parseInput(http.idParamsSchema, request.params);
-      const body = parseInput(http.adminStatusBodySchema, request.body);
       return parseOutput(http.publicUserResponseSchema, {
         user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review")
       });

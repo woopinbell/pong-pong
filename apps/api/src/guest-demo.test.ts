@@ -77,7 +77,7 @@ describe("guest demo HTTP boundary", () => {
       url: "/auth/guest",
       payload: { displayName: "직접 정한 이름" }
     });
-    expectApiError(withBody, 400, "validation_failed");
+    expectApiError(withBody, 400, "validation_error");
 
     for (let count = 0; count < 10; count += 1) {
       const response = await app.inject({ method: "POST", url: "/auth/guest" });
