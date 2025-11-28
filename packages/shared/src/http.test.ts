@@ -59,7 +59,7 @@ describe("HTTP contracts", () => {
   it("keeps the API error envelope stable", () => {
     const body = {
       error: {
-        code: "validation_failed",
+        code: "validation_error",
         message: "입력값을 확인해주세요.",
         requestId: "req-42",
         fieldErrors: { displayName: ["값을 입력해주세요."] }

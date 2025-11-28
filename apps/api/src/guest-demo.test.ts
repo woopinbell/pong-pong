@@ -124,6 +124,36 @@ describe("guest demo HTTP boundary", () => {
     }
   });
 
+  it("ignores forwarded client addresses when no trusted proxy is configured", async () => {
+    const direct = buildApp({
+      repo,
+      webOrigin: "http://localhost:3000",
+      appMode: "demo",
+      guestAccess: new GuestAccess({
+        secret: "guest-demo-test-secret-that-is-long-enough",
+        creationLimitPerMinute: 1
+      })
+    });
+    await direct.ready();
+    try {
+      const first = await direct.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.51" }
+      });
+      const spoofed = await direct.inject({
+        method: "POST",
+        url: "/auth/guest",
+        headers: { "x-forwarded-for": "203.0.113.52" }
+      });
+
+      expect(first.statusCode).toBe(200);
+      expectApiError(spoofed, 429, "guest_creation_rate_limited");
+    } finally {
+      await direct.close();
+    }
+  });
+
   it("does not expose guest login outside demo mode", async () => {
     const developmentApp = buildApp({ repo, webOrigin: "http://localhost:3000", appMode: "test" });
     await developmentApp.ready();
