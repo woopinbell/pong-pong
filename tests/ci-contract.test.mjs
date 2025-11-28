@@ -28,3 +28,12 @@ test("CI separates unit, PostgreSQL integration, process smoke, and browser E2E"
   assert.match(workflow, /pnpm --filter @pong-pong\/db migrate/);
   assert.match(workflow, /pnpm --filter @pong-pong\/db seed:dev/);
 });
+
+test("CI runs the Guest browser flow against a dedicated demo process", () => {
+  assert.match(workflow, /guest-demo-browser:/);
+  assert.match(workflow, /APP_MODE:\s*demo/);
+  assert.match(workflow, /NEXT_PUBLIC_APP_MODE:\s*demo/);
+  assert.match(workflow, /E2E_APP_MODE:\s*demo/);
+  assert.match(workflow, /pnpm e2e:guest-demo/);
+  assert.match(workflow, /tests\/e2e\/guest-demo\.spec\.ts/);
+});
