@@ -31,11 +31,12 @@ async function login(page: import("@playwright/test").Page, handle: string, disp
   await page.getByRole("link", { name: "경기", exact: true }).waitFor();
 }
 
-test("한국어 로비에서 로그인하고 주요 화면을 이동한다", async ({ page }) => {
+test("한국어 로비에서 로그인하고 주요 화면을 이동한다", async ({ page }, testInfo) => {
+  const handle = uniqueHandle("tester", testInfo);
   const lobbyMessage = `로비에서 바로 보냅니다 ${Date.now()} ${Math.random()}`;
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "퐁퐁" })).toBeVisible();
-  await page.getByLabel("핸들").fill("tester");
+  await page.getByLabel("핸들").fill(handle);
   await page.getByLabel("표시 이름").fill("테스터");
   await page.getByRole("button", { name: "개발 로그인" }).click();
 
@@ -51,12 +52,12 @@ test("한국어 로비에서 로그인하고 주요 화면을 이동한다", asy
   await page.getByRole("link", { name: "토너먼트" }).click();
   await expect(page.getByRole("heading", { name: "토너먼트" })).toBeVisible();
   await page.getByRole("link", { name: "프로필" }).click();
-  await expect(page).toHaveURL(/\/profile\/tester$/);
+  await expect(page).toHaveURL(new RegExp(`/profile/${handle}$`));
 });
 
-test("플레이 화면의 캔버스가 실제 픽셀을 그린다", async ({ page }) => {
+test("플레이 화면의 캔버스가 실제 픽셀을 그린다", async ({ page }, testInfo) => {
   await page.goto("/");
-  await page.getByLabel("핸들").fill("canvas");
+  await page.getByLabel("핸들").fill(uniqueHandle("canvas", testInfo));
   await page.getByLabel("표시 이름").fill("캔버스");
   await page.getByRole("button", { name: "개발 로그인" }).click();
   await page.getByRole("link", { name: "경기", exact: true }).click();
@@ -101,9 +102,9 @@ test("매치 채팅과 일시정지 제어를 확인한다", async ({ page }, te
   await expect(page.getByText("채팅선수: 좋은 랠리였습니다.")).toBeVisible();
 });
 
-test("프로필 친구 요청과 공유 복사를 확인한다", async ({ page }) => {
+test("프로필 친구 요청과 공유 복사를 확인한다", async ({ page }, testInfo) => {
   await page.context().grantPermissions(["clipboard-write"]);
-  await login(page, "friend-tester", "친구테스터");
+  await login(page, uniqueHandle("friend", testInfo), "친구테스터");
   await page.goto("/profile/spin-doctor");
   await expect(page.getByRole("heading", { name: "공개 최근 경기" })).toBeVisible();
   await page.getByRole("button", { name: "친구 추가" }).click();
@@ -142,8 +143,8 @@ test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ 
   await expect(page.getByRole("link", { name: "경기 입장" })).toBeVisible();
 });
 
-test("admin 핸들만으로 운영자 권한을 얻지 못한다", async ({ page }) => {
-  await login(page, "admin", "운영자");
+test("admin 핸들만으로 운영자 권한을 얻지 못한다", async ({ page }, testInfo) => {
+  await login(page, uniqueHandle("admin", testInfo), "운영자");
   await page.getByRole("link", { name: "관리" }).click();
   await expect(page.getByText("운영자 권한이 필요합니다.")).toBeVisible();
   await expect(page.getByRole("button", { name: /정지|해제/ })).toHaveCount(0);
