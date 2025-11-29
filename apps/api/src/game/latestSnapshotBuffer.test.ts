@@ -9,17 +9,19 @@ import {
 describe("LatestSnapshotBuffer", () => {
   afterEach(() => vi.useRealTimers());
 
-  it("sends snapshots while a send callback is in flight", () => {
+  it("does not treat delayed send callbacks as socket congestion", () => {
+    const onDropped = vi.fn();
     const socket = fakeSocket();
-    const buffer = new LatestSnapshotBuffer(socket);
+    const buffer = new LatestSnapshotBuffer(socket, { onDropped });
 
     buffer.enqueue("snapshot-1");
     buffer.enqueue("snapshot-2");
     buffer.enqueue("snapshot-3");
 
     expect(socket.sent).toEqual(["snapshot-1", "snapshot-2", "snapshot-3"]);
+    expect(onDropped).not.toHaveBeenCalled();
     socket.completeSend();
-    expect(socket.sent).toEqual(["snapshot-1", "snapshot-2", "snapshot-3"]);
+    socket.completeSend();
     socket.completeSend();
     buffer.close();
   });
@@ -27,16 +29,17 @@ describe("LatestSnapshotBuffer", () => {
   it("replaces congested snapshots and sends the latest after pressure clears", () => {
     vi.useFakeTimers();
     const socket = fakeSocket();
-    socket.bufferedAmount = SOFT_BUFFERED_AMOUNT_BYTES + 1;
     const buffer = new LatestSnapshotBuffer(socket);
 
     buffer.enqueue("snapshot-1");
+    socket.bufferedAmount = SOFT_BUFFERED_AMOUNT_BYTES + 1;
     buffer.enqueue("snapshot-2");
-    expect(socket.sent).toEqual([]);
+    buffer.enqueue("snapshot-3");
+    expect(socket.sent).toEqual(["snapshot-1"]);
 
     socket.bufferedAmount = 0;
     vi.advanceTimersByTime(50);
-    expect(socket.sent).toEqual(["snapshot-2"]);
+    expect(socket.sent).toEqual(["snapshot-1", "snapshot-3"]);
   });
 
   it("reports replacement drops and delivery delay without connection identifiers", () => {
@@ -101,18 +104,17 @@ type FakeSnapshotSocket = SnapshotSocket & {
 };
 
 function fakeSocket(): FakeSnapshotSocket {
-  let completion: ((error?: Error) => void) | null = null;
+  const completions: Array<(error?: Error) => void> = [];
   return {
     readyState: 1,
     bufferedAmount: 0,
     sent: [],
     send(payload, callback) {
       this.sent.push(payload);
-      completion = callback;
+      completions.push(callback);
     },
     completeSend(error) {
-      const callback = completion;
-      completion = null;
+      const callback = completions.shift();
       callback?.(error);
     },
     terminate: vi.fn()
