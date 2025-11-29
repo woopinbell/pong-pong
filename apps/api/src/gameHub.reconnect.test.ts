@@ -26,6 +26,7 @@ describe("GameHub connection recovery", () => {
     const { hub, finalizeMatch } = setup();
     const first = connect(hub, player("left-user", "왼쪽 사용자"));
     const roomId = await joinAiMatch(first);
+
     const replacement = connect(hub, player("left-user", "왼쪽 사용자"));
     await flushEvents();
 
@@ -34,14 +35,21 @@ describe("GameHub connection recovery", () => {
       expect.objectContaining({ roomId, side: "left" })
     );
     expect(replacement.latest("game.snapshot")).toEqual(
-      expect.objectContaining({ snapshot: expect.objectContaining({ roomId }) })
+      expect.objectContaining({
+        snapshot: expect.objectContaining({
+          roomId,
+          state: expect.objectContaining({ phase: "waiting" })
+        })
+      })
     );
     first.receive({ v: 1, type: "queue.join", mode: "ai" });
     await flushEvents();
     expect(hub.liveStats().activeRooms).toBe(1);
+    expect(hub.scheduledRoomCount).toBe(0);
 
     await vi.advanceTimersByTimeAsync(15_001);
     expect(finalizeMatch).not.toHaveBeenCalled();
+    expect(hub.liveStats().activeRooms).toBe(1);
   });
 
   it("restores the reserved side and sends the latest snapshot within 15 seconds", async () => {
