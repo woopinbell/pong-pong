@@ -1,6 +1,27 @@
 import { expect, test } from "@playwright/test";
 
 const apiBase = process.env.API_BASE_URL ?? "http://localhost:4000";
+const maxDevHandleLength = 24;
+const maxIdentitySuffixLength = 12;
+const runToken = Date.now().toString(36);
+
+function identitySuffix(testInfo: import("@playwright/test").TestInfo): string {
+  const projectToken = testInfo.project.name.includes("mobile") ? "m" : "d";
+  const workerToken = testInfo.workerIndex.toString(36).slice(-2);
+  const suffix = `${projectToken}${workerToken}-${runToken}`;
+  if (suffix.length > maxIdentitySuffixLength) {
+    throw new Error(`E2E identity suffix exceeds ${maxIdentitySuffixLength} characters`);
+  }
+  return suffix;
+}
+
+function uniqueHandle(prefix: string, testInfo: import("@playwright/test").TestInfo): string {
+  const handle = `${prefix}-${identitySuffix(testInfo)}`;
+  if (handle.length > maxDevHandleLength) {
+    throw new Error(`E2E handle exceeds ${maxDevHandleLength} characters`);
+  }
+  return handle;
+}
 
 async function login(page: import("@playwright/test").Page, handle: string, displayName: string) {
   await page.goto("/");
@@ -63,8 +84,8 @@ test("플레이 화면의 캔버스가 실제 픽셀을 그린다", async ({ pag
   expect(hasPaint).toBe(true);
 });
 
-test("매치 채팅과 일시정지 제어를 확인한다", async ({ page }) => {
-  await login(page, "chat-player", "채팅선수");
+test("매치 채팅과 일시정지 제어를 확인한다", async ({ page }, testInfo) => {
+  await login(page, uniqueHandle("chat", testInfo), "채팅선수");
   await page.getByRole("link", { name: "경기", exact: true }).click();
   await page.getByRole("button", { name: "인공지능 연습 시작" }).click();
   await expect(page.getByText("준비 대기 중")).toBeVisible();
@@ -92,8 +113,8 @@ test("프로필 친구 요청과 공유 복사를 확인한다", async ({ page }
 });
 
 test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ page, playwright }, testInfo) => {
-  const suffix = `${testInfo.project.name}-${Date.now()}`.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  await login(page, `cup-player-${suffix}`, "컵선수");
+  const suffix = identitySuffix(testInfo);
+  await login(page, uniqueHandle("cup-player", testInfo), "컵선수");
   const name = `E2E 퐁퐁 컵 ${suffix}`;
   const created = await page.request.post(`${apiBase}/tournaments`, {
     data: { name }
@@ -103,13 +124,13 @@ test("토너먼트 브래킷과 경기 입장 액션을 확인한다", async ({ 
   const duplicateJoin = await page.request.post(`${apiBase}/tournaments/${tournament.id}/join`);
   expect(duplicateJoin.ok()).toBe(true);
   for (const handle of ["cup-two", "cup-three", "cup-four"]) {
-    const playerRequest = await playwright.request.newContext({ baseURL: apiBase });
+    const playerRequest = await playwright.request.newContext();
     try {
-      const loginResponse = await playerRequest.post("/auth/dev-login", {
-        data: { handle: `${handle}-${suffix}`, displayName: handle }
+      const loginResponse = await playerRequest.post(`${apiBase}/auth/dev-login`, {
+        data: { handle: uniqueHandle(handle, testInfo), displayName: handle }
       });
       expect(loginResponse.ok()).toBe(true);
-      const joinResponse = await playerRequest.post(`/tournaments/${tournament.id}/join`);
+      const joinResponse = await playerRequest.post(`${apiBase}/tournaments/${tournament.id}/join`);
       expect(joinResponse.ok()).toBe(true);
     } finally {
       await playerRequest.dispose();
