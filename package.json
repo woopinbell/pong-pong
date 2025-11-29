@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm unit",
     "unit": "pnpm -r test",
+    "test:contracts": "node --test tests/ci-contract.test.mjs tests/docker-production.test.mjs tests/load/fault-scenario.test.mjs tests/load/load-harness.test.mjs",
     "postgres-integration": "pnpm --filter @pong-pong/db postgres-integration",
     "load:faults": "node tests/load/fault-scenario.mjs",
     "smoke:http": "node tests/smoke-api.mjs",

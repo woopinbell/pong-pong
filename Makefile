@@ -1,4 +1,4 @@
-.PHONY: install typecheck build test unit smoke smoke-http smoke-ws e2e dev down
+.PHONY: install typecheck build test unit contracts smoke smoke-http smoke-ws e2e dev down
 
 install:
 	pnpm install
@@ -14,6 +14,9 @@ test:
 
 unit:
 	pnpm unit
+
+contracts:
+	pnpm test:contracts
 
 smoke: smoke-http smoke-ws
 
