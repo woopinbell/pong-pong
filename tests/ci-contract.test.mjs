@@ -4,12 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const workflow = readFileSync(resolve(import.meta.dirname, "../.github/workflows/ci.yml"), "utf8");
+const nodeVersion = readFileSync(resolve(import.meta.dirname, "../.node-version"), "utf8").trim();
 
 test("CI pins the repository toolchain in every job", () => {
   const nodeVersions = [...workflow.matchAll(/node-version:\s*([^\s]+)/g)]
     .map((match) => match[1]);
   assert.ok(nodeVersions.length > 0);
-  assert.deepEqual([...new Set(nodeVersions)], ["24.18.0"]);
+  assert.deepEqual([...new Set(nodeVersions)], [nodeVersion]);
   assert.match(workflow, /version: 10\.32\.1/);
   assert.match(workflow, /pnpm install --frozen-lockfile/);
 });

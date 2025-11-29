@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 const root = resolve(import.meta.dirname, "..");
+const nodeVersion = read(".node-version").trim();
 
 test("production compose exposes only Caddy and runs migration once", () => {
   const result = spawnSync("docker", ["compose", "config", "--format", "json"], {
@@ -38,7 +39,7 @@ test("production compose exposes only Caddy and runs migration once", () => {
 test("production images pin Node and run application processes as non-root", () => {
   for (const fileName of ["apps/api/Dockerfile", "apps/web/Dockerfile"]) {
     const source = read(fileName);
-    assert.match(source, /FROM node:24\.18\.0-bookworm-slim/);
+    assert.match(source, new RegExp(`FROM node:${escapeRegExp(nodeVersion)}-bookworm-slim`));
     assert.match(source, /^USER node$/m);
     assert.doesNotMatch(source, /^CMD .*\b(?:pnpm|npm)\b/m);
   }
@@ -57,4 +58,8 @@ test("compose requires secrets and keeps metrics behind the internal API network
 
 function read(fileName) {
   return readFileSync(resolve(root, fileName), "utf8");
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
