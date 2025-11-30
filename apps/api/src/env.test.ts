@@ -42,6 +42,7 @@ describe("readEnv", () => {
   it("honors an explicit production app mode without relying on NODE_ENV", () => {
     const env = readEnv({
       APP_MODE: "production",
+      DATABASE_URL: "postgres://production.example/pong",
       SESSION_SECRET: "0123456789abcdef0123456789abcdef"
     });
 
