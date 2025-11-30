@@ -16,9 +16,13 @@ export function readEnv(input = process.env): ApiEnv {
   ) {
     throw new Error("SESSION_SECRET must be at least 32 bytes in demo and production modes");
   }
+  const databaseUrl = input.DATABASE_URL ?? null;
+  if (appMode === "production" && !databaseUrl) {
+    throw new Error("DATABASE_URL is required in production mode");
+  }
   return {
     port: Number(input.API_PORT ?? 4000),
-    databaseUrl: input.DATABASE_URL ?? null,
+    databaseUrl,
     webOrigin: input.WEB_ORIGIN ?? "http://localhost:3000",
     sessionSecret: configuredSecret ?? "dev-session-secret",
     appMode,
