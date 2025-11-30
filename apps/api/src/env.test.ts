@@ -50,4 +50,21 @@ describe("readEnv", () => {
     expect(readEnv({ APP_MODE: "test" }).appMode).toBe("test");
     expect(() => readEnv({ APP_MODE: "staging" })).toThrow("APP_MODE");
   });
+
+  it("rejects an in-memory repository in every production mode", () => {
+    const strongSecret = "0123456789abcdef0123456789abcdef";
+
+    expect(() => readEnv({
+      APP_MODE: "production",
+      SESSION_SECRET: strongSecret
+    })).toThrow("DATABASE_URL");
+    expect(() => readEnv({
+      NODE_ENV: "production",
+      SESSION_SECRET: strongSecret
+    })).toThrow("DATABASE_URL");
+    expect(readEnv({
+      APP_MODE: "demo",
+      SESSION_SECRET: strongSecret
+    }).databaseUrl).toBeNull();
+  });
 });
