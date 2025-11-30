@@ -1,4 +1,4 @@
-FROM node:24.18.0-bookworm-slim AS dependencies
+FROM node:24.18.1-bookworm-slim AS dependencies
 
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
@@ -18,7 +18,7 @@ RUN pnpm --filter @pong-pong/shared build \
   && pnpm --filter @pong-pong/db build \
   && pnpm --filter @pong-pong/api build
 
-FROM node:24.18.0-bookworm-slim AS runner
+FROM node:24.18.1-bookworm-slim AS runner
 
 ENV NODE_ENV=production
 WORKDIR /app

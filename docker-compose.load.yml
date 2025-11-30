@@ -6,7 +6,7 @@ services:
       - "127.0.0.1:${TOXIPROXY_EDGE_PORT:-18080}:18080"
 
   toxiproxy-bootstrap:
-    image: node:24.18.0-alpine
+    image: node:24.18.1-alpine
     command: ["node", "/load/toxiproxy-control.mjs", "ensure"]
     environment:
       TOXIPROXY_API_URL: http://toxiproxy:8474

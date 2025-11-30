@@ -1,4 +1,4 @@
-FROM node:24.18.0-bookworm-slim AS dependencies
+FROM node:24.18.1-bookworm-slim AS dependencies
 
 RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 WORKDIR /app
@@ -21,7 +21,7 @@ COPY packages/shared packages/shared
 RUN pnpm --filter @pong-pong/shared build \
   && pnpm --filter @pong-pong/web build
 
-FROM node:24.18.0-bookworm-slim AS runner
+FROM node:24.18.1-bookworm-slim AS runner
 
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
