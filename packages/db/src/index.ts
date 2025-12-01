@@ -698,6 +698,7 @@ class PostgresRepository implements AppRepository {
   }
 
   async createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage> {
+    assertChatRoom(input);
     const result = await sql<ChatMessageRow>`
       insert into chat_messages (scope, room_id, sender_id, body)
       values (${input.scope}, ${input.roomId ?? null}, ${input.senderId}, ${input.body})
@@ -1213,6 +1214,7 @@ class MemoryRepository implements AppRepository {
   }
 
   async createChatMessage(input: { scope: "lobby" | "match"; roomId?: string | null; senderId: string; body: string }): Promise<ChatMessage> {
+    assertChatRoom(input);
     const sender = await this.getUserById(input.senderId);
     if (!sender) throw new Error("chat sender not found");
     const message: ChatMessage = {
@@ -1357,6 +1359,18 @@ function assertWsTicketHash(value: string): void {
 function assertTicketTtl(value: number): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new Error("invalid websocket ticket ttl");
+  }
+}
+
+function assertChatRoom(input: { scope: "lobby" | "match"; roomId?: string | null }): void {
+  if (input.scope === "lobby") {
+    if (input.roomId !== undefined && input.roomId !== null) {
+      throw new Error("lobby chat must not identify a room");
+    }
+    return;
+  }
+  if (!input.roomId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.roomId)) {
+    throw new Error("match chat requires a UUID room");
   }
 }
 

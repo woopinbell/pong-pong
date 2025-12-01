@@ -90,7 +90,8 @@ describe("PostgreSQL integration", () => {
         "002_ws_tickets",
         "003_match_finalization",
         "004_friendship_tournament_invariants",
-        "005_expire_legacy_sessions"
+        "005_expire_legacy_sessions",
+        "006_chat_invariants"
       ]);
 
       await migrateDatabase(databaseUrl);

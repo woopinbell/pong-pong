@@ -136,10 +136,11 @@ describe("memory repository", () => {
     const user = await repo.upsertDevUser({ handle: "speaker", displayName: "말하는선수" });
 
     const lobby = await repo.createChatMessage({ scope: "lobby", senderId: user.id, body: "로비 메시지" });
-    const match = await repo.createChatMessage({ scope: "match", roomId: "room-1", senderId: user.id, body: "매치 메시지" });
+    const roomId = "11111111-1111-4111-8111-111111111111";
+    const match = await repo.createChatMessage({ scope: "match", roomId, senderId: user.id, body: "매치 메시지" });
 
     expect(lobby.sender.handle).toBe("speaker");
-    expect(match.roomId).toBe("room-1");
+    expect(match.roomId).toBe(roomId);
     expect((await repo.listLobbyChat()).map((message) => message.body)).toContain("로비 메시지");
   });
 
