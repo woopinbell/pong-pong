@@ -16,7 +16,7 @@ describe("version 1 client events", () => {
     { payload: { v: 1, type: "game.pause", roomId: "room-1" } },
     { payload: { v: 1, type: "game.resume", roomId: "room-1" } },
     { payload: { v: 1, type: "game.input", roomId: "room-1", inputSeq: 7, direction: -1 } },
-    { payload: { v: 1, type: "chat.send", scope: "match", roomId: "room-1", body: "hello" } }
+    { payload: { v: 1, type: "chat.send", scope: "match", roomId: "11111111-1111-4111-8111-111111111111", body: "hello" } }
   ])("accepts $payload.type", ({ payload }) => {
     expect(parseClientEvent(JSON.stringify(payload))).toEqual(payload);
   });

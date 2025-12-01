@@ -4,8 +4,9 @@ import { gameFinishedSchema, gameSnapshotSchema, playerSideSchema } from "./game
 
 const version = { v: z.literal(1) } as const;
 const roomIdSchema = z.string().min(1);
+const chatBodySchema = z.string().trim().min(1).max(240);
 
-export const clientEventSchema = z.discriminatedUnion("type", [
+const gameplayClientEventSchema = z.discriminatedUnion("type", [
   z.object({
     ...version,
     type: z.literal("queue.join"),
@@ -23,13 +24,27 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     inputSeq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     direction: z.union([z.literal(-1), z.literal(0), z.literal(1)])
   }).strict(),
+]);
+
+const chatClientEventSchema = z.discriminatedUnion("scope", [
   z.object({
     ...version,
     type: z.literal("chat.send"),
-    scope: z.enum(["lobby", "match"]),
-    roomId: z.string().nullable().optional(),
-    body: z.string().trim().min(1).max(240)
+    scope: z.literal("lobby"),
+    body: chatBodySchema
+  }).strict(),
+  z.object({
+    ...version,
+    type: z.literal("chat.send"),
+    scope: z.literal("match"),
+    roomId: z.string().uuid(),
+    body: chatBodySchema
   }).strict()
+]);
+
+export const clientEventSchema = z.union([
+  gameplayClientEventSchema,
+  chatClientEventSchema
 ]);
 
 export const wsErrorCodeSchema = z.enum([

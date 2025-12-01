@@ -230,13 +230,14 @@ export class GameHub {
       if (event.type === "game.resume") this.resumeRoom(client, event.roomId);
       if (event.type === "game.input") this.applyInput(client, event.roomId, event.inputSeq, event.direction);
       if (event.type === "chat.send") {
+        const roomId = event.scope === "match" ? event.roomId : null;
         const message = await this.repo.createChatMessage({
           scope: event.scope,
-          roomId: event.roomId ?? null,
+          roomId,
           senderId: client.user.id,
           body: event.body
         });
-        if (event.scope === "match" && event.roomId) {
+        if (event.scope === "match") {
           this.broadcastRoom(event.roomId, { type: "chat.message", message });
         } else {
           this.broadcastAll({ type: "chat.message", message });

@@ -20,7 +20,7 @@ try {
     return onlineHandles.includes("left-smoke") && onlineHandles.includes("right-smoke") ? lobby : null;
   });
 
-  send(leftSocket, { type: "chat.send", scope: "lobby", roomId: null, body: "로비 실시간 확인" });
+  send(leftSocket, { type: "chat.send", scope: "lobby", body: "로비 실시간 확인" });
   await waitFor(() => events.find((item) => item.event.type === "chat.message" && item.event.message.scope === "lobby"));
 
   send(leftSocket, { type: "queue.join", mode: "queue" });

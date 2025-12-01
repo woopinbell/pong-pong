@@ -109,7 +109,7 @@ export default function HomePage() {
     try {
       const socket = socketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ v: 1, type: "chat.send", scope: "lobby", roomId: null, body }));
+        socket.send(JSON.stringify({ v: 1, type: "chat.send", scope: "lobby", body }));
       } else {
         await chatMutation.mutateAsync(body);
       }
