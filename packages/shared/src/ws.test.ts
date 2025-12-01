@@ -57,6 +57,37 @@ describe("version 1 client events", () => {
       body: "a".repeat(241)
     }))).toThrow();
   });
+
+  it.each([
+    {
+      name: "lobby event with a null room",
+      payload: { v: 1, type: "chat.send", scope: "lobby", roomId: null, body: "hello" }
+    },
+    {
+      name: "lobby event with a room",
+      payload: {
+        v: 1,
+        type: "chat.send",
+        scope: "lobby",
+        roomId: "11111111-1111-4111-8111-111111111111",
+        body: "hello"
+      }
+    },
+    {
+      name: "match event without a room",
+      payload: { v: 1, type: "chat.send", scope: "match", body: "hello" }
+    },
+    {
+      name: "match event with a null room",
+      payload: { v: 1, type: "chat.send", scope: "match", roomId: null, body: "hello" }
+    },
+    {
+      name: "match event with a non-UUID room",
+      payload: { v: 1, type: "chat.send", scope: "match", roomId: "room-1", body: "hello" }
+    }
+  ])("rejects $name", ({ payload }) => {
+    expect(() => parseClientEvent(JSON.stringify(payload))).toThrow();
+  });
 });
 
 describe("version 1 server events", () => {
