@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { ClientEvent, ServerEvent } from "@pong-pong/shared";
 import { requestWsTicket } from "@/lib/api";
+import { isChatForActiveRoom } from "./chatScope";
 import { GameSocketClient, type GameSocketHandlers, type GameWebSocket } from "./GameSocketClient";
 import { canStartNewMatch, gameConnectionReducer, initialGameConnectionState } from "./gameConnection";
 
@@ -30,6 +31,7 @@ export function useGameConnection() {
         dispatch({ type: "gameFinished", result: event.result });
         return;
       case "chat.message":
+        if (!isChatForActiveRoom(event.message, stateRef.current.roomId)) return;
         dispatch({
           type: "chatReceived",
           message: `${event.message.sender.displayName}: ${event.message.body}`
