@@ -101,6 +101,52 @@ describe("PostgreSQL integration", () => {
     }, { migrate: false });
   });
 
+  it("cleans legacy chat rows and enforces scope-room invariants", async () => {
+    await withIsolatedDatabase(async ({ databaseUrl, openPool, openRepository }) => {
+      await migrateDatabase(databaseUrl, "005_expire_legacy_sessions");
+      const pool = openPool();
+      const repository = openRepository();
+      const sender = await repository.upsertDevUser({
+        handle: "chat-migration-user",
+        displayName: "Chat Migration User"
+      });
+      const validRoomId = "11111111-1111-4111-8111-111111111111";
+
+      await pool.query(
+        `insert into chat_messages (scope, room_id, sender_id, body)
+         values
+           ('lobby', 'legacy-room', $1, 'lobby-normalized'),
+           ('match', null, $1, 'match-missing-room'),
+           ('match', 'legacy-room', $1, 'match-invalid-room'),
+           ('unknown', null, $1, 'unknown-scope'),
+           ('lobby', null, $1, 'lobby-valid'),
+           ('match', $2, $1, 'match-valid')`,
+        [sender.id, validRoomId]
+      );
+
+      await migrateDatabase(databaseUrl);
+      await migrateDatabase(databaseUrl);
+
+      const rows = await pool.query<{ scope: string; room_id: string | null; body: string }>(
+        "select scope, room_id, body from chat_messages order by body"
+      );
+      expect(rows.rows).toEqual([
+        { scope: "lobby", room_id: null, body: "lobby-normalized" },
+        { scope: "lobby", room_id: null, body: "lobby-valid" },
+        { scope: "match", room_id: validRoomId, body: "match-valid" }
+      ]);
+      await expect(pool.query(
+        "insert into chat_messages (scope, room_id, sender_id, body) values ('lobby', $1, $2, 'invalid')",
+        [validRoomId, sender.id]
+      )).rejects.toMatchObject({ code: "23514" });
+      await expect(pool.query(
+        "insert into chat_messages (scope, room_id, sender_id, body) values ('match', null, $1, 'invalid')",
+        [sender.id]
+      )).rejects.toMatchObject({ code: "23514" });
+      expect((await appliedMigrations(pool)).filter((name) => name === "006_chat_invariants")).toHaveLength(1);
+    }, { migrate: false });
+  });
+
   it("expires legacy sessions without changing users or match history", async () => {
     await withIsolatedDatabase(async ({ databaseUrl, openPool, openRepository }) => {
       await migrateDatabase(databaseUrl, "004_friendship_tournament_invariants");

@@ -144,6 +144,31 @@ describe("memory repository", () => {
     expect((await repo.listLobbyChat()).map((message) => message.body)).toContain("로비 메시지");
   });
 
+  it("rejects chat records whose scope and room disagree", async () => {
+    const repo = createMemoryRepository();
+    await repo.ensureSeedData();
+    const user = await repo.upsertDevUser({ handle: "chat-guard", displayName: "채팅 검사" });
+    const roomId = "11111111-1111-4111-8111-111111111111";
+
+    await expect(repo.createChatMessage({
+      scope: "lobby",
+      roomId,
+      senderId: user.id,
+      body: "invalid lobby"
+    })).rejects.toThrow("must not identify a room");
+    await expect(repo.createChatMessage({
+      scope: "match",
+      senderId: user.id,
+      body: "missing room"
+    })).rejects.toThrow("requires a UUID room");
+    await expect(repo.createChatMessage({
+      scope: "match",
+      roomId: "room-1",
+      senderId: user.id,
+      body: "invalid room"
+    })).rejects.toThrow("requires a UUID room");
+  });
+
   it("tracks friend requests and tournament entries", async () => {
     const repo = createMemoryRepository();
     await repo.ensureSeedData();
