@@ -230,16 +230,30 @@ export class GameHub {
       if (event.type === "game.resume") this.resumeRoom(client, event.roomId);
       if (event.type === "game.input") this.applyInput(client, event.roomId, event.inputSeq, event.direction);
       if (event.type === "chat.send") {
-        const roomId = event.scope === "match" ? event.roomId : null;
-        const message = await this.repo.createChatMessage({
-          scope: event.scope,
-          roomId,
-          senderId: client.user.id,
-          body: event.body
-        });
         if (event.scope === "match") {
+          const room = this.rooms.get(event.roomId);
+          if (!room || client.roomId !== room.id || !sideFor(room, client)) {
+            this.send(client, {
+              type: "error",
+              code: "forbidden",
+              message: "현재 경기방에만 채팅을 보낼 수 있습니다."
+            });
+            return;
+          }
+          const message = await this.repo.createChatMessage({
+            scope: "match",
+            roomId: event.roomId,
+            senderId: client.user.id,
+            body: event.body
+          });
           this.broadcastRoom(event.roomId, { type: "chat.message", message });
         } else {
+          const message = await this.repo.createChatMessage({
+            scope: "lobby",
+            roomId: null,
+            senderId: client.user.id,
+            body: event.body
+          });
           this.broadcastAll({ type: "chat.message", message });
         }
       }
