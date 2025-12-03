@@ -818,6 +818,10 @@ export class GameHub {
     this.roomScheduler.unregister(room.id);
     const sessionState = room.session.pause();
     if (sessionState !== "paused") return;
+    for (const side of ["left", "right"] as const) {
+      room.snapshot.state.paddles[side].dy = 0;
+      room.simulation.paddles[side].direction = 0;
+    }
     room.snapshot.state.phase = sessionState;
     this.broadcastSnapshot(room);
   }
