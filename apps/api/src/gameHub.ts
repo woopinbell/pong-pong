@@ -69,6 +69,7 @@ type Room = {
   simulation: PongSimulationState;
   aiController: PongAi | null;
   finishing: Promise<void> | null;
+  finalizationRetryTimer: NodeJS.Timeout | null;
   session: RoomSession;
   reconnectTimer: NodeJS.Timeout | null;
   disconnectedUsers: Partial<Record<PlayerSide, string>>;
@@ -81,6 +82,8 @@ const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 const SNAPSHOT_DELIVERY_DIVISOR = 2;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
+const FINALIZATION_RETRY_BASE_DELAY_MS = 250;
+const FINALIZATION_RETRY_MAX_DELAY_MS = 5_000;
 const GUEST_RESULT_RETENTION_MS = 2 * 60 * 1_000;
 const INVALID_EVENT_MESSAGE = "올바르지 않은 메시지입니다.";
 const INTERNAL_ERROR_MESSAGE = "메시지를 처리하지 못했습니다.";
@@ -392,6 +395,7 @@ export class GameHub {
   private abandonRoom(room: Room): void {
     this.roomScheduler.unregister(room.id);
     this.clearReconnectTimer(room);
+    this.clearFinalizationRetryTimer(room);
     this.releaseMatchmakingReservations(room);
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
@@ -404,6 +408,11 @@ export class GameHub {
   private clearReconnectTimer(room: Room): void {
     if (room.reconnectTimer) clearTimeout(room.reconnectTimer);
     room.reconnectTimer = null;
+  }
+
+  private clearFinalizationRetryTimer(room: Room): void {
+    if (room.finalizationRetryTimer) clearTimeout(room.finalizationRetryTimer);
+    room.finalizationRetryTimer = null;
   }
 
   private sendMatchContext(client: Client, room: Room, side: PlayerSide): void {
@@ -654,6 +663,7 @@ export class GameHub {
     this.roomScheduler.stop();
     for (const room of this.rooms.values()) {
       this.clearReconnectTimer(room);
+      this.clearFinalizationRetryTimer(room);
       this.releaseMatchmakingReservations(room);
     }
     this.rooms.clear();
@@ -708,6 +718,7 @@ export class GameHub {
       simulation,
       aiController: options.ai ? new PongAi(roomId, npcUser?.rating ?? 1200) : null,
       finishing: null,
+      finalizationRetryTimer: null,
       session,
       reconnectTimer: null,
       disconnectedUsers: {},
@@ -908,32 +919,36 @@ export class GameHub {
       return;
     }
     let finalized: Awaited<ReturnType<MatchResultRepository["finalizeMatch"]>>;
-    try {
-      finalized = await this.repo.finalizeMatch({
-        resultKey: `room:${room.id}:finished`,
-        mode: room.mode,
-        winnerId: winner?.id ?? null,
-        loserId: loser?.id ?? null,
-        scoreLeft: room.snapshot.state.leftScore,
-        scoreRight: room.snapshot.state.rightScore,
-        ...(room.tournamentMatchId ? {
-          tournament: {
-            tournamentMatchId: room.tournamentMatchId,
-            roomId: room.id
-          }
-        } : {})
-      });
-    } catch (error) {
-      this.releaseMatchmakingReservations(room);
-      this.observer.matchFinalized?.({
-        outcome: "failure",
-        persistence: "database",
-        created: null,
-        roomId: room.id,
-        matchId: null,
-        userIds: roomUserIds(room)
-      });
-      throw error;
+    let retryAttempt = 0;
+    while (true) {
+      try {
+        finalized = await this.repo.finalizeMatch({
+          resultKey: `room:${room.id}:finished`,
+          mode: room.mode,
+          winnerId: winner?.id ?? null,
+          loserId: loser?.id ?? null,
+          scoreLeft: room.snapshot.state.leftScore,
+          scoreRight: room.snapshot.state.rightScore,
+          ...(room.tournamentMatchId ? {
+            tournament: {
+              tournamentMatchId: room.tournamentMatchId,
+              roomId: room.id
+            }
+          } : {})
+        });
+        break;
+      } catch {
+        retryAttempt += 1;
+        this.observer.matchFinalized?.({
+          outcome: "failure",
+          persistence: "database",
+          created: null,
+          roomId: room.id,
+          matchId: null,
+          userIds: roomUserIds(room)
+        });
+        if (!await this.waitForFinalizationRetry(room, retryAttempt)) return;
+      }
     }
     try {
       this.observer.matchFinalized?.({
@@ -957,6 +972,23 @@ export class GameHub {
     } finally {
       this.removeFinishedRoom(room);
     }
+  }
+
+  private waitForFinalizationRetry(room: Room, attempt: number): Promise<boolean> {
+    if (this.rooms.get(room.id) !== room) return Promise.resolve(false);
+    this.clearFinalizationRetryTimer(room);
+    const delayMs = Math.min(
+      FINALIZATION_RETRY_BASE_DELAY_MS * 2 ** Math.min(Math.max(0, attempt - 1), 10),
+      FINALIZATION_RETRY_MAX_DELAY_MS
+    );
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (room.finalizationRetryTimer === timer) room.finalizationRetryTimer = null;
+        resolve(this.rooms.get(room.id) === room);
+      }, delayMs);
+      timer.unref?.();
+      room.finalizationRetryTimer = timer;
+    });
   }
 
   private rememberGuestResult(room: Room, result: GameFinished): void {
@@ -990,6 +1022,7 @@ export class GameHub {
 
   private removeFinishedRoom(room: Room): void {
     this.roomScheduler.unregister(room.id);
+    this.clearFinalizationRetryTimer(room);
     this.releaseMatchmakingReservations(room);
     for (const client of Object.values(room.clients)) {
       if (client) client.roomId = null;
