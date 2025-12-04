@@ -82,6 +82,8 @@ const SIMULATION_TIMESTEP_MS = DEFAULT_TIMESTEP_MS;
 const SNAPSHOT_DELIVERY_DIVISOR = 2;
 const CONNECTION_REPLACED_CLOSE_CODE = 4001;
 const CONNECTION_REPLACED_REASON = "connection replaced";
+const ACCOUNT_SUSPENDED_CLOSE_CODE = 4003;
+const ACCOUNT_SUSPENDED_REASON = "account suspended";
 const FINALIZATION_RETRY_BASE_DELAY_MS = 250;
 const FINALIZATION_RETRY_MAX_DELAY_MS = 5_000;
 const GUEST_RESULT_RETENTION_MS = 2 * 60 * 1_000;
@@ -200,6 +202,27 @@ export class GameHub {
     for (const payload of pendingPayloads) {
       this.receive(client, payload).catch(() => undefined);
     }
+  }
+
+  revokeUser(userId: string): void {
+    const client = this.clientsByUser.get(userId);
+    if (!client) return;
+    client.heartbeat.stop();
+    client.snapshots.close();
+    this.leaveQueue(client);
+    this.leaveTournamentWaiters(client);
+    this.clients.delete(client.id);
+    this.clientsByUser.delete(userId);
+    this.inputGate.releaseUser(userId);
+    if (client.roomId) {
+      const room = this.rooms.get(client.roomId);
+      const side = room ? sideFor(room, client) : null;
+      if (room && side) this.reserveRoomSide(room, side, userId);
+    }
+    if (client.socket.readyState === WebSocket.OPEN) {
+      client.socket.close(ACCOUNT_SUSPENDED_CLOSE_CODE, ACCOUNT_SUSPENDED_REASON);
+    }
+    this.broadcastPresence();
   }
 
   private async receive(client: Client, payload: string): Promise<void> {

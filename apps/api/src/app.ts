@@ -510,8 +510,11 @@ export function buildApp({
         body
       } = parseHttpRequest(http.jsonHttpRequestContracts.adminBan, request);
       const user = await requireAdmin(repo, request);
+      const banned = body.banned ?? true;
+      const target = await repo.setUserBan(user.id, id, banned, body.reason ?? "manual review");
+      if (banned) hub.revokeUser(id);
       return parseOutput(http.publicUserResponseSchema, {
-        user: await repo.setUserBan(user.id, id, body.banned ?? true, body.reason ?? "manual review")
+        user: target
       });
     });
 
@@ -521,8 +524,11 @@ export function buildApp({
         body
       } = parseHttpRequest(http.jsonHttpRequestContracts.adminStatus, request);
       const user = await requireAdmin(repo, request);
+      const banned = body.status === "banned";
+      const target = await repo.setUserBan(user.id, id, banned, body.reason ?? "manual review");
+      if (banned) hub.revokeUser(id);
       return parseOutput(http.publicUserResponseSchema, {
-        user: await repo.setUserBan(user.id, id, body.status === "banned", body.reason ?? "manual review")
+        user: target
       });
     });
   }
