@@ -122,7 +122,7 @@ export function buildApp({
   });
   app.register(cookie);
   app.register(async (realtime) => {
-    await realtime.register(websocket);
+    await realtime.register(websocket, { options: { maxPayload: PRE_AUTH_MESSAGE_MAX_BYTES } });
     realtime.get("/ws", { websocket: true }, (socket, request) => {
       const pendingPayloads: string[] = [];
       let pendingBytes = 0;

@@ -145,7 +145,7 @@ describe("one-time websocket tickets", () => {
     try {
       const closed = closeDetails(socket);
       socket.send(Buffer.alloc(8 * 1024 + 1));
-      expect(await closed).toEqual({ code: 1009, reason: "pre-auth payload too large" });
+      expect(await closed).toEqual({ code: 1009, reason: "" });
     } finally {
       releaseAuthentication();
     }
