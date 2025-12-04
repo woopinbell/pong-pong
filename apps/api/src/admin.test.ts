@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 import { createMemoryRepository, type AppRepository } from "@pong-pong/db";
 import { buildApp } from "./app";
 
@@ -6,6 +7,8 @@ describe("admin routes", () => {
   let repo: AppRepository;
   let app: ReturnType<typeof buildApp>;
   let adminCookie: string;
+  let address: string;
+  const sockets: WebSocket[] = [];
 
   beforeEach(async () => {
     repo = createMemoryRepository();
@@ -14,10 +17,13 @@ describe("admin routes", () => {
     if (!admin) throw new Error("seed:dev admin was not created");
     adminCookie = `pp_session=${await repo.createSession(admin.id)}`;
     app = buildApp({ repo, webOrigin: "http://localhost:3000" });
-    await app.ready();
+    address = await app.listen({ host: "127.0.0.1", port: 0 });
   });
 
   afterEach(async () => {
+    for (const socket of sockets.splice(0)) {
+      if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+    }
     await app.close();
     await repo.close();
   });
@@ -73,6 +79,47 @@ describe("admin routes", () => {
         requestId: expect.any(String)
       })
     });
+  });
+
+  it("closes an existing websocket immediately after account suspension", async () => {
+    const targetLogin = await app.inject({
+      method: "POST",
+      url: "/auth/dev-login",
+      payload: { handle: "live-target", displayName: "실시간 대상" }
+    });
+    const targetId = targetLogin.json<{ user: { id: string } }>().user.id;
+    const ticketResponse = await app.inject({
+      method: "POST",
+      url: "/auth/ws-ticket",
+      headers: { cookie: sessionCookie(targetLogin) }
+    });
+    const socket = new WebSocket(
+      `${address.replace(/^http/, "ws")}/ws?ticket=${ticketResponse.json<{ ticket: string }>().ticket}&v=1`
+    );
+    sockets.push(socket);
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve());
+      socket.once("error", reject);
+    });
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      socket.once("close", (code, reason) => resolve({ code, reason: reason.toString("utf8") }));
+    });
+
+    const ban = await app.inject({
+      method: "POST",
+      url: `/admin/users/${targetId}/ban`,
+      headers: { cookie: adminCookie },
+      payload: { banned: true, reason: "live revoke test" }
+    });
+
+    expect(ban.statusCode).toBe(200);
+    await expect(closed).resolves.toEqual({ code: 4003, reason: "account suspended" });
+    const newTicket = await app.inject({
+      method: "POST",
+      url: "/auth/ws-ticket",
+      headers: { cookie: sessionCookie(targetLogin) }
+    });
+    expect(newTicket.statusCode).toBe(403);
   });
 });
 
