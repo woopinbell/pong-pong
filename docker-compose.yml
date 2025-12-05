@@ -48,6 +48,7 @@ services:
       retries: 12
     expose:
       - "4000"
+    stop_grace_period: 70s
 
   web:
     image: pong-pong-web:local
