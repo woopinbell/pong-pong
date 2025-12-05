@@ -28,6 +28,7 @@ test("production compose exposes only Caddy and runs migration once", () => {
   assert.deepEqual(services.migrate.command, ["node", "packages/db/dist/cli.js", "migrate"]);
   assert.equal(services.migrate.restart, "no");
   assert.equal(services.api.depends_on.migrate.condition, "service_completed_successfully");
+  assert.ok(parseDurationSeconds(services.api.stop_grace_period) >= 60);
 
   for (const [name, service] of Object.entries(services)) {
     for (const volume of service.volumes ?? []) {
@@ -62,4 +63,11 @@ function read(fileName) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseDurationSeconds(value) {
+  assert.equal(typeof value, "string");
+  const match = /^(?:(\d+)m)?(?:(\d+)s)?$/.exec(value);
+  assert.ok(match, `unsupported duration: ${value}`);
+  return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
 }
