@@ -30,6 +30,10 @@ test("CI separates unit, PostgreSQL integration, process smoke, and browser E2E"
   assert.match(workflow, /pnpm --filter @pong-pong\/db seed:dev/);
 });
 
+test("CI keeps registered browser API requests on the login cookie host", () => {
+  assert.match(workflow, /^      API_BASE_URL: http:\/\/localhost:4000$/m);
+});
+
 test("CI runs the Guest browser flow against a dedicated demo process", () => {
   assert.match(workflow, /guest-demo-browser:/);
   assert.match(workflow, /APP_MODE:\s*demo/);
