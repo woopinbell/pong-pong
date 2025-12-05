@@ -1,44 +1,109 @@
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import assert from "node:assert/strict";
+import { parse } from "yaml";
 
-const workflow = readFileSync(resolve(import.meta.dirname, "../.github/workflows/ci.yml"), "utf8");
-const nodeVersion = readFileSync(resolve(import.meta.dirname, "../.node-version"), "utf8").trim();
+const root = resolve(import.meta.dirname, "..");
+const workflowPath = resolve(
+  root,
+  ".github/workflows/ci.yml",
+);
+const workflow = parse(readFileSync(workflowPath, "utf8"));
+const nodeVersion = readFileSync(resolve(root, ".node-version"), "utf8").trim();
+const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+const pnpmVersion = packageJson.packageManager.split("@").at(-1);
+const jobs = workflow.jobs;
+const steps = Object.values(jobs).flatMap((job) => job.steps ?? []);
+const runCommands = steps.flatMap((step) =>
+  typeof step.run === "string" ? [step.run] : [],
+);
 
-test("CI pins the repository toolchain in every job", () => {
-  const nodeVersions = [...workflow.matchAll(/node-version:\s*([^\s]+)/g)]
-    .map((match) => match[1]);
-  assert.ok(nodeVersions.length > 0);
-  assert.deepEqual([...new Set(nodeVersions)], [nodeVersion]);
-  assert.match(workflow, /version: 10\.32\.1/);
-  assert.match(workflow, /pnpm install --frozen-lockfile/);
+test("CI targets only the main branch", () => {
+  assert.equal(workflow.name, "CI");
+  assert.deepEqual(Object.keys(workflow.on).sort(), ["pull_request", "push"]);
+  assert.deepEqual(workflow.on.push.branches, ["main"]);
+  assert.deepEqual(workflow.on.pull_request.branches, ["main"]);
+  assert.equal(workflow.on.workflow_dispatch, undefined);
+  assert.equal(workflow.on.pull_request_target, undefined);
+  assert.equal(workflow.on.push["paths-ignore"], undefined);
+  assert.equal(workflow.on.pull_request["paths-ignore"], undefined);
 });
 
-test("CI separates unit, PostgreSQL integration, process smoke, and browser E2E", () => {
-  for (const command of [
-    "pnpm unit",
-    "pnpm postgres-integration",
-    "pnpm smoke:http",
-    "pnpm smoke:ws",
-    "pnpm e2e"
-  ]) {
-    assert.match(workflow, new RegExp(command.replace(":", "\\:")));
+test("CI uses read-only permissions and a single in-flight run per ref", () => {
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.equal(workflow.concurrency["cancel-in-progress"], true);
+  assert.match(workflow.concurrency.group, /github\.workflow/);
+  assert.match(workflow.concurrency.group, /github\.ref/);
+
+  for (const step of steps.filter((candidate) =>
+    candidate.uses?.startsWith("actions/checkout@"),
+  )) {
+    assert.equal(step.with?.["persist-credentials"], false);
   }
-  assert.match(workflow, /services:\s*\n\s+postgres:/);
-  assert.match(workflow, /pnpm --filter @pong-pong\/db migrate/);
-  assert.match(workflow, /pnpm --filter @pong-pong\/db seed:dev/);
 });
 
-test("CI keeps registered browser API requests on the login cookie host", () => {
-  assert.match(workflow, /^      API_BASE_URL: http:\/\/localhost:4000$/m);
+test("CI pins the repository Node and pnpm toolchains", () => {
+  const nodeSteps = steps.filter((step) =>
+    step.uses?.startsWith("actions/setup-node@"),
+  );
+  const pnpmSteps = steps.filter((step) =>
+    step.uses?.startsWith("pnpm/action-setup@"),
+  );
+  assert.equal(nodeSteps.length, 4);
+  assert.equal(pnpmSteps.length, 4);
+  for (const step of nodeSteps) {
+    assert.equal(step.with?.["node-version-file"], ".node-version");
+    assert.equal(step.with?.["cache-dependency-path"], "pnpm-lock.yaml");
+  }
+  for (const step of pnpmSteps) {
+    assert.equal(String(step.with?.version), pnpmVersion);
+  }
+  assert.equal(nodeVersion, packageJson.engines.node);
+  assert.equal(runCommands.filter((command) => command === "make install").length, 4);
 });
 
-test("CI runs the Guest browser flow against a dedicated demo process", () => {
-  assert.match(workflow, /guest-demo-browser:/);
-  assert.match(workflow, /APP_MODE:\s*demo/);
-  assert.match(workflow, /NEXT_PUBLIC_APP_MODE:\s*demo/);
-  assert.match(workflow, /E2E_APP_MODE:\s*demo/);
-  assert.match(workflow, /pnpm e2e:guest-demo/);
-  assert.match(workflow, /tests\/e2e\/guest-demo\.spec\.ts/);
+test("CI separates functional, database, process, browser, and Compose gates", () => {
+  assert.deepEqual(Object.keys(jobs).sort(), [
+    "guest-demo-browser",
+    "postgres-integration",
+    "process-and-browser",
+    "production-compose",
+    "verify",
+  ]);
+  assert.equal(jobs["process-and-browser"].services.postgres.image, "postgres:16-alpine");
+  assert.match(runCommands.join("\n"), /make check/);
+  assert.match(runCommands.join("\n"), /make postgres-integration/);
+  assert.match(runCommands.join("\n"), /make smoke/);
+  assert.match(runCommands.join("\n"), /make e2e\n?/);
+  assert.match(runCommands.join("\n"), /make e2e-guest-demo/);
+  assert.doesNotMatch(runCommands.join("\n"), /documentation|README|devlog/i);
+});
+
+test("CI uploads process logs on failure", () => {
+  for (const jobSteps of [
+    jobs["process-and-browser"].steps,
+    jobs["guest-demo-browser"].steps,
+  ]) {
+    assert.ok(
+      jobSteps.some(
+        (step) =>
+          step.if === "failure()" &&
+          step.uses?.startsWith("actions/upload-artifact@"),
+      ),
+    );
+  }
+  assert.equal(jobs["process-and-browser"].env.API_BASE_URL, "http://localhost:4000");
+  assert.equal(jobs["guest-demo-browser"].env.APP_MODE, "demo");
+});
+
+test("CI starts and removes the production Compose stack", () => {
+  const composeCommands = jobs["production-compose"].steps
+    .flatMap((step) => (typeof step.run === "string" ? [step.run] : []))
+    .join("\n");
+  assert.match(composeCommands, /docker compose up --build --wait --wait-timeout 600/);
+  assert.match(composeCommands, /\/api\/health\/ready/);
+  assert.match(composeCommands, /\/api\/metrics/);
+  assert.match(composeCommands, /docker compose down --volumes --remove-orphans/);
+  assert.equal(jobs["production-compose"]["timeout-minutes"], 30);
 });

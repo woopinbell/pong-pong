@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm unit",
     "unit": "pnpm -r test",
+    "unit:functional": "pnpm --filter @pong-pong/shared test && pnpm --filter @pong-pong/db test && pnpm --filter @pong-pong/api test:functional && pnpm --filter @pong-pong/web test",
     "test:contracts": "node --test tests/ci-contract.test.mjs tests/docker-production.test.mjs tests/load/fault-scenario.test.mjs tests/load/load-harness.test.mjs",
     "postgres-integration": "pnpm --filter @pong-pong/db postgres-integration",
     "load:faults": "node tests/load/fault-scenario.mjs",
@@ -28,7 +29,8 @@
     "@playwright/test": "^1.52.0",
     "@types/node": "^22.15.3",
     "typescript": "^5.8.3",
-    "vitest": "^3.1.2"
+    "vitest": "^3.1.2",
+    "yaml": "^2.9.0"
   },
   "pnpm": {
     "overrides": {

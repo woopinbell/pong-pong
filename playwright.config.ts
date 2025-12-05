@@ -6,6 +6,9 @@ export default defineConfig({
   expect: {
     timeout: 10_000
   },
+  reporter: process.env.CI
+    ? [["github"], ["html", { open: "never" }]]
+    : [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     trace: "retain-on-failure",
