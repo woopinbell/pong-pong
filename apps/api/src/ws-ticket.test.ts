@@ -181,6 +181,18 @@ describe("one-time websocket tickets", () => {
     }
   });
 
+  it("closes an authenticated socket on a transport payload above 8 KiB", async () => {
+    const { cookie } = await login("auth-payload-limit");
+    const { ticket } = await issueTicket(cookie);
+    const socket = await connect(`/ws?ticket=${ticket}&v=1`);
+    await expectAccepted(socket);
+
+    const closed = closeDetails(socket);
+    socket.send(Buffer.alloc(8 * 1024 + 1));
+
+    expect(await closed).toEqual({ code: 1009, reason: "" });
+  });
+
   async function login(handle: string): Promise<{ cookie: string; userId: string }> {
     const response = await app.inject({
       method: "POST",
