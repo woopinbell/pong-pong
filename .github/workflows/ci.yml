@@ -2,10 +2,16 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -16,6 +22,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -25,26 +33,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24.18.1
+          node-version-file: .node-version
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: make install
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Run unit tests
-        run: pnpm unit
-
-      - name: Run static contract tests
-        run: pnpm test:contracts
-
-      - name: Build
-        run: pnpm build
-
-      - name: Verify production artifacts
-        run: pnpm verify:build
+      - name: Run static and build checks
+        run: make check
 
   postgres-integration:
     name: PostgreSQL integration tests
@@ -54,6 +51,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -63,14 +62,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24.18.1
+          node-version-file: .node-version
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: make install
 
       - name: Run PostgreSQL integration tests
-        run: pnpm postgres-integration
+        run: make postgres-integration
 
   process-and-browser:
     name: HTTP, WebSocket, and browser tests
@@ -98,6 +98,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -107,11 +109,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24.18.1
+          node-version-file: .node-version
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: make install
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
@@ -157,9 +160,19 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:3000 >/dev/null
 
-          pnpm smoke:http
-          pnpm smoke:ws
-          pnpm e2e
+          make smoke
+          make e2e
+
+      - name: Upload process logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-and-browser-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/pong-api.log
+            /tmp/pong-web.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   guest-demo-browser:
     name: Guest demo browser tests
@@ -177,6 +190,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -186,11 +201,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24.18.1
+          node-version-file: .node-version
           cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: make install
 
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
@@ -227,4 +243,44 @@ jobs:
           done
           curl --fail --silent http://localhost:3000 >/dev/null
 
-          pnpm e2e:guest-demo
+          make e2e-guest-demo
+
+      - name: Upload process logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-demo-browser-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/pong-demo-api.log
+            /tmp/pong-demo-web.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  production-compose:
+    name: Production Compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_PASSWORD: ci-production-compose-password
+      SESSION_SECRET: ci-production-compose-session-secret-32-bytes
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Start the production stack
+        run: docker compose up --build --wait --wait-timeout 600
+
+      - name: Verify the public health endpoint
+        run: curl --fail --silent http://localhost:8080/api/health/ready
+
+      - name: Verify metrics stay internal
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/metrics)
+          test "$status" = "404"
+
+      - name: Stop the production stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
