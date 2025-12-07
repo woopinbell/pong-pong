@@ -27,6 +27,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
       <aside className="border-b border-line bg-white lg:min-h-screen lg:border-b-0 lg:border-r">
         <div className="flex h-full flex-col gap-8 p-5">
+          {/* [INTV:PERF] next/link의 Link: 일반 <a>와 달리 페이지 전체를 다시 불러오지 않고
+              클라이언트 쪽에서 전환하며, 화면에 보이면 그 대상 페이지를 미리 가져와두기도 한다
+              (prefetch) — 일반 <a>로 재구현하면 매 내부 이동마다 전체 페이지 리로드가 일어나
+              SPA 전환의 이점(상태 유지, 빠른 전환)을 잃는다. */}
           <Link href="/" className="flex items-center gap-3">
             <div className="grid h-11 w-11 place-items-center rounded-full bg-blue-600 text-white">
               <Gamepad2 size={24} />
@@ -43,6 +47,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               const className = `focus-ring flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-bold transition ${
                 active ? "bg-blue-50 text-blue-700" : "text-muted hover:bg-slate-50 hover:text-ink"
               }`;
+              // [INTV:EDGE] 로그인 전에는 "프로필" 메뉴를 누를 수 있는 링크가 아니라, 누를 수
+              // 없는(aria-disabled) span으로 대신 렌더링한다 — 스크린 리더 등 보조기술에 "이 항목은
+              // 있지만 지금은 비활성 상태"임을 알린다(href를 그냥 "#"이나 빈 문자열로 둔 Link를
+              // 쓰면 시각적으로만 비활성처럼 보일 뿐, 보조기술 사용자에게는 여전히 클릭 가능한
+              // 링크로 인식된다).
               if (item.id === "profile" && !me) {
                 return (
                   <span key={item.id} aria-disabled="true" className={className}>

@@ -15,6 +15,9 @@ const ticket = {
 describe("GameSocketClient", () => {
   afterEach(() => vi.useRealTimers());
 
+  // GameSocketClient.ts의 generation 메커니즘을 직접 검증한다: connect()를 연달아 두 번 부르면(첫 번째가
+  // 아직 티켓 응답을 기다리는 도중에) 첫 번째 시도는 취소(AbortSignal)되고, 실제로 열리는 소켓은 두 번째
+  // 시도 것 하나뿐이어야 한다.
   it("cancels an unused one-time ticket request before starting another connection", async () => {
     const signals: AbortSignal[] = [];
     const ticketProvider = vi.fn((signal?: AbortSignal) => new Promise<WsTicketResponse>((resolve, reject) => {

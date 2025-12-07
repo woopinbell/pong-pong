@@ -17,6 +17,9 @@ describe("test database reset guard", () => {
     })).toThrow("TEST_DATABASE_URL");
   });
 
+  // it.each(배열)("... %s", ...): 앞서 http.test.ts류에서 본 객체 기반 it.each와 달리, 배열 원소를 그대로 콜백
+  // 인자로 받고 테스트 이름의 %s 자리에 그 값을 문자열로 끼워 넣는 형태 — 케이스가 객체가 아니라 단순 값일 때 쓴다.
+  // 아래 URL들은 모두 testReset.ts의 DEDICATED_TEST_DATABASE 정규식에 맞지 않는(테스트 전용임이 이름만으로 확실치 않은) DB들이다.
   it.each([
     APPLICATION_DATABASE_URL,
     "postgresql://pong:pong@localhost:5432/pong_pong_test_backup",
@@ -28,6 +31,8 @@ describe("test database reset guard", () => {
     })).toThrow("Unsafe test reset target");
   });
 
+  // 각 케이스는 testReset.ts의 정규식(`^-c search_path=(test_[a-f0-9]{32})$`)을 교묘하게 비껴가려는 시도를
+  // 재현한다: 스키마를 콤마로 여러 개 나열, 해시가 아닌 임의 이름, 격리 스키마 뒤에 public을 덧붙임, 아예 다른 옵션.
   it.each([
     "-c search_path=public,other",
     "-c search_path=test_manual",

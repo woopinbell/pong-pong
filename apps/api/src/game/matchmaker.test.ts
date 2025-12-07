@@ -117,6 +117,9 @@ function player(
   return { userId, rating, kind };
 }
 
+// Matchmaker는 시간을 own clock() 함수로만 주입받도록 설계돼 있어(내부적으로 Date.now/setTimeout을 직접
+// 부르지 않는다), vi.useFakeTimers 같은 전역 타이머 모킹 없이도 이렇게 직접 통제 가능한 시계 하나만 넘기면
+// 충분하다 — advance()로 원하는 만큼 시간을 "흘려보낸" 뒤 결과를 확인한다.
 function mutableClock(initialMs: number): { now: () => number; advance: (milliseconds: number) => void } {
   let nowMs = initialMs;
   return {

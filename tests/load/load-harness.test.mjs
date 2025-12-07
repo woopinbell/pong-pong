@@ -4,6 +4,9 @@ import test from "node:test";
 import { createLoadProfile } from "./load-profile.mjs";
 import { buildProxyDefinitions, toxicForCommand } from "./toxiproxy-control.mjs";
 
+// 부하 테스트 도구 자체(load-profile.mjs, toxiproxy-control.mjs, pong-load.js, docker-compose.load.yml)가
+// 서로 어긋나지 않고 하나의 일관된 시스템으로 맞물려 있는지 확인하는 "계약 테스트" 모음이다 — 실제로 서버를
+// 띄워 부하를 주지는 않고, 설정/스크립트 소스를 정적으로 검사한다.
 test("default profile attempts 500 connections and observes 50 rooms", () => {
   const profile = createLoadProfile({});
 
@@ -45,6 +48,10 @@ test("extended profile makes 1,000 connections an explicit environment choice", 
   );
 });
 
+// pong-load.js(실제 k6 스크립트)의 소스 코드를 텍스트로 읽어, load-profile.mjs가 thresholds로 요구하는
+// 지표들을 k6 쪽에서도 실제로 기록하고 있는지 정적으로 대조한다 — new Rate(...)/Trend(...)/Counter(...)는
+// k6가 제공하는 커스텀 지표 타입 생성자다(Rate: 비율/성공률, Trend: p95 같은 분포/백분위수, Counter: 단순
+// 누적 개수). 설정 쪽(thresholds)과 실제 계측 쪽(k6 스크립트)이 따로국밥이 되는 걸 이 테스트가 막아준다.
 test("k6 scenario records every required service-level indicator", async () => {
   const source = await readFile(new URL("./pong-load.js", import.meta.url), "utf8");
 
@@ -111,15 +118,24 @@ test("Toxiproxy plan separates PostgreSQL and edge failure paths", () => {
   assert.throws(() => toxicForCommand("db-latency", ["bad"]), /positive integer/);
 });
 
+// docker-compose.load.yml은 이 저장소의 "운영용" compose(docker-compose.yml)와 별개로, 부하 테스트 때만
+// 쓰는 오버레이 구성이다 — DATABASE_URL이 db:5432로 직접 가지 않고 toxiproxy:15432를 거치도록 재배선돼
+// 있어야, fault-scenario.mjs의 db-latency/db-down 명령이 실제로 API의 DB 트래픽에 영향을 줄 수 있다.
 test("load overlay routes API database traffic and the public edge through Toxiproxy", async () => {
   const compose = await readFile(new URL("../../docker-compose.load.yml", import.meta.url), "utf8");
 
   assert.match(compose, /ghcr\.io\/shopify\/toxiproxy:2\.12\.0/);
   assert.match(compose, /DATABASE_URL: postgres:\/\/pong:.*@toxiproxy:15432\/pong_pong/);
   assert.match(compose, /\$\{POSTGRES_PASSWORD:\?/);
+  // ":-"(기본값 치환)이 아니라 ":?"(필수, 없으면 에러)를 쓰는지까지 확인한다 — 부하 테스트 환경이라고
+  // 비밀번호를 조용히 기본값으로 때우는 걸 허용하지 않겠다는 의도.
   assert.doesNotMatch(compose, /\$\{POSTGRES_PASSWORD:-/);
+  // 포트 바인딩이 127.0.0.1로 한정돼 있다 — fault-scenario.mjs의 loopbackUrl 검증과 같은 맥락으로, 이
+  // 장애 주입용 포트들이 로컬 밖으로 노출되지 않게 막는다.
   assert.match(compose, /127\.0\.0\.1:\$\{TOXIPROXY_EDGE_PORT:-18080\}:18080/);
   assert.match(compose, /127\.0\.0\.1:\$\{API_METRICS_PORT:-14000\}:4000/);
+  // toxiproxy-bootstrap: 운영 compose의 migrate 서비스와 같은 패턴 — Toxiproxy 프록시 정의를 미리 만들어두고
+  // 끝나는 1회성 서비스이고, 다른 서비스들은 이게 성공적으로 끝난 뒤에야 시작된다.
   assert.match(compose, /toxiproxy-bootstrap:/);
   assert.match(compose, /service_completed_successfully/);
 });

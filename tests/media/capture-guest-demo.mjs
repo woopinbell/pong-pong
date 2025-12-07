@@ -4,8 +4,13 @@ import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { chromium, devices } from "@playwright/test";
 
+// 이건 테스트가 아니라, 데모 시나리오를 실제로 재생시켜 스크린샷/영상을 뽑아내는 제작 스크립트다 —
+// tests/e2e/guest-demo.spec.ts와 거의 같은 흐름(게스트 입장, PvP 재연결, AI 폴백)을 밟지만, 결과를
+// assert로 검증하는 대신 README/소개 페이지 등에 쓸 이미지·영상 자산으로 저장한다. test() 러너의 fixture를
+// 쓰지 않고 chromium.launch()로 Playwright의 저수준 브라우저 자동화 API를 직접 다룬다.
 const baseURL = process.env.DEMO_BASE_URL ?? "http://localhost:8080";
 const rootDir = process.cwd();
+// 실행할 때마다 시각을 넣은 폴더명을 만들어, 이전 실행분 위에 그냥 덮어써버리지 않게 한다.
 const runLabel = new Date().toISOString().replaceAll(/[:.]/g, "-");
 const rawDir = path.join(rootDir, "output", "playwright", `guest-demo-${runLabel}`);
 const draftDir = path.join(rootDir, "application-draft", "assets", "guest-demo");
@@ -25,6 +30,8 @@ try {
 await verifyFiles(rawFiles);
 await mkdir(draftDir, { recursive: true });
 
+// 원본(무압축) 캡처는 용량이 크므로, 실제로 문서/사이트에 쓸 최종 자산은 ffmpeg로 다시 인코딩해 압축한
+// 뒤 별도 폴더(draftDir)에 남긴다 — 결과물을 "촬영본"과 "배포본" 두 단계로 분리한 것.
 const selectedFiles = [
   await compressPng(rawFiles[0], "guest-entry-desktop.png"),
   await compressPng(rawFiles[1], "guest-pvp-desktop.png"),
@@ -46,6 +53,7 @@ async function captureGuestEntry(browser) {
     await enterAsGuest(page);
     await page.getByRole("heading", { name: /다시 오신 것을 환영합니다/ }).waitFor();
     const output = path.join(rawDir, "guest-entry-desktop.png");
+    // fullPage: true — 지금 보이는 화면(뷰포트)만이 아니라 스크롤해야 보이는 부분까지 포함해 페이지 전체를 찍는다.
     await page.screenshot({ path: output, fullPage: true });
     return output;
   } finally {
@@ -56,6 +64,8 @@ async function captureGuestEntry(browser) {
 async function capturePvpReconnect(browser) {
   const videoDir = path.join(rawDir, "pvp-video");
   await mkdir(videoDir, { recursive: true });
+  // recordVideo 옵션을 준 컨텍스트에서 연 페이지는 자동으로 화면이 .webm으로 녹화된다 — page.video()로
+  // 그 녹화 핸들을 얻어뒀다가, 컨텍스트를 닫은 뒤(녹화가 마무리된 뒤) saveAs()로 최종 경로에 저장한다.
   const leftContext = await browser.newContext({
     baseURL,
     viewport: { width: 1280, height: 720 },
@@ -74,6 +84,8 @@ async function capturePvpReconnect(browser) {
       enterAsGuest(rightPage)
     ]);
 
+    // guest-demo.spec.ts의 재연결 테스트와 같은 routeWebSocket + close(code 1012) 기법으로, 실제 대국
+    // 도중 연결이 끊겼다 복구되는 장면을 그대로 재생시켜 영상으로 남긴다.
     const connections = [];
     await leftPage.routeWebSocket(/.*/, async (socket) => {
       if (connections.length > 0) await new Promise((resolve) => setTimeout(resolve, 600));
@@ -121,6 +133,8 @@ async function capturePvpReconnect(browser) {
 async function captureAiFallback(browser) {
   const videoDir = path.join(rawDir, "ai-video");
   await mkdir(videoDir, { recursive: true });
+  // devices["Pixel 7"]: Playwright가 미리 만들어둔 실제 기기 프로필(화면 크기, 유저 에이전트, 터치 입력
+  // 여부 등)을 그대로 newContext에 펼쳐 넣어, 실제 모바일 브라우저에 가깝게 흉내 낸다.
   const pixel = devices["Pixel 7"];
   const context = await browser.newContext({
     ...pixel,
@@ -179,6 +193,8 @@ async function waitFor(predicate, timeoutMs, message) {
   throw new Error(message);
 }
 
+// 파일이 실제로 존재하고 어느 정도 크기가 있는지(5KB 초과)를 확인한다 — 예를 들어 녹화가 실패해 텅 빈
+// 영상 파일만 남는 것처럼, 자산이 "그럴듯하게 만들어졌지만 사실 비어있는" 상황을 미리 걸러낸다.
 async function verifyFiles(files) {
   for (const file of files) {
     const details = await stat(file);
@@ -189,12 +205,17 @@ async function verifyFiles(files) {
 
 async function compressPng(input, filename) {
   const output = path.join(draftDir, filename);
+  // -frames:v 1: 첫 프레임(정지 이미지)만 뽑고, -compression_level 9는 PNG의 무손실 압축 강도를 최대로.
   runFfmpeg(["-y", "-i", input, "-frames:v", "1", "-compression_level", "9", output]);
   return output;
 }
 
 async function compressWebm(input, filename) {
   const output = path.join(draftDir, filename);
+  // -an: 오디오 스트림 제거(어차피 브라우저 캡처엔 소리가 없다). -vf fps=24: 프레임레이트를 낮춰 용량을
+  // 줄인다. -c:v libvpx-vp9: VP9 코덱으로 인코딩. -crf 38 -b:v 0: 고정 비트레이트 대신 "화질 목표치(CRF)"
+  // 기준으로 인코딩해 필요한 만큼만 비트레이트를 쓰게 한다(숫자가 클수록 화질은 낮아지고 용량은 작아진다).
+  // -deadline good -cpu-used 2: 인코딩 속도와 압축 효율 사이의 절충값(더 느리지만 더 잘 압축되는 쪽에 가깝게).
   runFfmpeg([
     "-y",
     "-i",

@@ -36,6 +36,9 @@ describe("GameHub runtime protection", () => {
       });
     }
 
+    // expect.poll(콜백): 콜백을 반복 호출해가며 그 반환값이 뒤에 이어붙인 matcher를 만족할 때까지 기다리는
+    // vitest API — GameHub 내부 처리는 비동기(await this.repo...)라 소켓에 에러 이벤트가 "언제" 도착할지
+    // 정확히 알 수 없을 때, 특정 Promise 하나를 기다리는 대신 "결국 이 상태가 될 때까지" 폴링한다.
     await expect.poll(() => socket.events().filter((event) => event.type === "error")).toEqual([
       expect.objectContaining({ type: "error", code: "rate_limited" })
     ]);
@@ -68,6 +71,9 @@ describe("GameHub runtime protection", () => {
   });
 });
 
+// GameHub가 기대하는 WS 소켓 인터페이스(readyState/bufferedAmount/send/ping/terminate + "message"/"close"
+// 이벤트를 내는 EventEmitter)만 최소한으로 흉내 낸 가짜 소켓 — 실제 ws 라이브러리나 네트워크 없이도
+// GameHub의 로직을 단위 테스트할 수 있게 해준다.
 class FakeSocket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
   bufferedAmount = 0;

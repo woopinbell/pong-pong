@@ -41,6 +41,10 @@ test("fault scenario refuses to alter a non-loopback target", () => {
   }
 });
 
+// 실제 Toxiproxy/서버 없이 fault-scenario.mjs의 오케스트레이션 로직만 검증한다 — probeReadiness를
+// 가짜로 바꿔치기하고, URL별로 "이번에 호출되면 돌려줄 응답"을 배열(큐)로 미리 준비해뒀다가 호출될 때마다
+// shift()로 하나씩 꺼내준다. 이렇게 하면 baseline → 지연 주입 → 다운 → 복구로 이어지는 실제 상태 변화
+// 시퀀스를, 진짜로 장애를 일으키지 않고도 순서대로 재현할 수 있다.
 test("fault scenario records database and edge failure recovery as JSON", async () => {
   const commands = [];
   const sleeps = [];
@@ -176,6 +180,8 @@ function notReady(status, durationMs) {
   };
 }
 
+// 호출할 때마다 목록의 다음 값을 돌려주고, 목록이 바닥나면 마지막 값을 계속 반환하는 아주 단순한 가짜
+// 시계 — now()를 "시작 시각 한 번, 끝난 시각 한 번" 이렇게 순서대로 다른 값으로 관찰하고 싶을 때 쓴다.
 function sequence(...values) {
   let index = 0;
   return () => values[Math.min(index++, values.length - 1)];

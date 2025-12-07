@@ -22,6 +22,9 @@ describe("guest demo HTTP boundary", () => {
       appMode: "demo",
       guestAccess: new GuestAccess({ secret: "guest-demo-test-secret-that-is-long-enough" })
     });
+    // app.ready(): Fastify 플러그인(라우트 등록, 데코레이터 등)이 비동기로 전부 로드될 때까지 기다린다 —
+    // 이 파일은 listen 없이 inject만 쓰는 테스트가 대부분이라, listen이 암묵적으로 해주는 "준비 완료 대기"를
+    // 여기서 직접 해준다.
     await app.ready();
   });
 
@@ -55,6 +58,9 @@ describe("guest demo HTTP boundary", () => {
     expect(createSession).not.toHaveBeenCalled();
     expect(upsertUser).not.toHaveBeenCalled();
 
+    // 쿠키 속성들: Max-Age는 브라우저가 이 쿠키를 몇 초 뒤 스스로 지울지, HttpOnly는 자바스크립트(document.cookie)로
+    // 이 쿠키를 읽지 못하게 막아 XSS로 탈취되는 걸 방지, Secure는 HTTPS 연결에서만 전송, SameSite=Lax는 다른
+    // 사이트에서 걸어온 링크를 타고 들어올 때는 쿠키를 안 실어보내 CSRF 공격 표면을 줄이는 설정이다.
     const cookieHeader = guestCookieHeader(response);
     expect(cookieHeader).toContain("Max-Age=7200");
     expect(cookieHeader).toContain("Path=/");
@@ -87,6 +93,10 @@ describe("guest demo HTTP boundary", () => {
     expectApiError(limited, 429, "guest_creation_rate_limited");
   });
 
+  // x-forwarded-for / trustProxy: 서버 앞에 로드밸런서 같은 리버스 프록시가 있으면, 프록시가 실제 클라이언트
+  // IP를 이 헤더에 실어 전달한다. 하지만 이 헤더는 클라이언트가 직접 조작해서 보낼 수도 있는 값이라, 신뢰할 수
+  // 있는 프록시를 실제로 두고 있을 때(trustProxy: true)만 이 헤더를 믿고, 아니면 무시하고 TCP 연결의 진짜
+  // 발신 주소만 써야 한다 — 그렇지 않으면 이 헤더를 위조해서 IP별 속도 제한을 우회할 수 있다.
   it("applies guest creation limits to the forwarded client IP behind the trusted proxy", async () => {
     const proxied = buildApp({
       repo,

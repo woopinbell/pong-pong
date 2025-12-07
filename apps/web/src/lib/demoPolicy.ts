@@ -39,6 +39,12 @@ export function createNavigation(demoMode: boolean, profileHref: string): Naviga
     : navigation;
 }
 
+// [INTV:ARCH] middleware.ts가 실제로 라우트 접근을 막는 데 쓰는 판단 기준 — 데모 모드에서 숨겨야
+// 하는 경로들의 접두사를 여기 한 곳에 모아둬서, "어떤 경로가 데모에서 제한되는지"가 미들웨어와
+// (아래) 네비게이션 필터링 양쪽에서 어긋나지 않게 한다(createNavigation의 필터링과 이 함수가 서로
+// 다른 목록을 따로 관리했다면, 메뉴에는 안 보이는데 URL 직접 접근은 막히지 않는 것 같은 불일치가
+// 생길 수 있었다 — 단일 진실 공급원으로 그 위험을 없앤 것). app.ts의 appMode !== "demo" 게이팅과
+// 같은 목적을, 여기서는 백엔드 라우트가 아니라 프론트엔드 라우트 레벨에서 수행한다.
 export function isDemoRestrictedPath(pathname: string): boolean {
   return ["/dashboard", "/leaderboard", "/tournaments", "/profile", "/admin"]
     .some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

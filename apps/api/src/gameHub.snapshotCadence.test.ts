@@ -23,6 +23,9 @@ describe("GameHub snapshot cadence", () => {
     await Promise.all(repositories.splice(0).map((repository) => repository.close()));
   });
 
+  // gameHub.ts의 tick()/SNAPSHOT_DELIVERY_DIVISOR 주석에서 설명한 "물리는 매 틱, 전송은 한 틱 걸러 + 방마다
+  // 엇갈리게"를 실제로 검증한다 — 4틱(=200ms) 동안 두 방을 합쳐 스냅샷이 정확히 4번(각 방 2번씩) 나가고,
+  // 같은 틱에 두 방이 동시에 보내는 일이 없어야 한다(각 틱마다 합계가 항상 1).
   it("keeps 20Hz simulation while staggering 10Hz snapshots across rooms", async () => {
     const repository = createMemoryRepository();
     repositories.push(repository);

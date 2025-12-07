@@ -6,6 +6,9 @@ describe("memory repository", () => {
   it("exposes tournament completion only through finalizeMatch", () => {
     const repo = createMemoryRepository();
 
+    // toHaveProperty/.not.toHaveProperty: 객체가 그 이름의 속성을 갖는지(또는 갖지 않는지)만 확인하는 matcher.
+    // 여기서는 "토너먼트 매치 완료도 별도 메서드가 아니라 finalizeMatch 하나로만 이뤄져야 한다"는 API 설계
+    // 제약을 회귀적으로 지키기 위한 테스트다 — 실수로 completeTournamentMatch 같은 우회 경로가 생기는 걸 방지.
     expect(repo).toHaveProperty("finalizeMatch");
     expect(repo).not.toHaveProperty("completeTournamentMatch");
   });
@@ -150,6 +153,9 @@ describe("memory repository", () => {
     const user = await repo.upsertDevUser({ handle: "chat-guard", displayName: "채팅 검사" });
     const roomId = "11111111-1111-4111-8111-111111111111";
 
+    // expect(promise).rejects.toThrow(...): toThrow의 프로미스 버전 — 프로미스가 reject될 때까지 기다렸다가
+    // 그 에러 메시지를 확인한다. 동기 함수를 () => ... 로 감싸던 것과 달리, 비동기 함수는 이렇게 promise 자체를
+    // expect에 넘기고 .rejects를 붙인다.
     await expect(repo.createChatMessage({
       scope: "lobby",
       roomId,
@@ -228,6 +234,8 @@ describe("memory repository", () => {
     expect(reverseRequest.id).toBe(firstRequest.id);
     expect(reverseRequest.status).toBe("accepted");
     expect(reverseRequest.user.id).toBe(firstUser.id);
+    // expect.objectContaining({...}): toEqual 안에 중첩해서 "이 필드들만 일치하면 되고 나머지 필드는 신경 안 씀"을
+    // 표현하는 비대칭 matcher — 배열 전체는 정확히 1개짜리여야 하지만(toEqual), 그 안의 객체는 부분 일치로 충분할 때 쓴다.
     await expect(repo.listFriends(firstUser.id)).resolves.toEqual([
       expect.objectContaining({ id: firstRequest.id, status: "accepted", user: expect.objectContaining({ id: secondUser.id }) })
     ]);
@@ -253,6 +261,9 @@ describe("memory repository", () => {
     await repo.joinTournament(tournament.id, earlyEntries[0].id);
     await repo.joinTournament(tournament.id, earlyEntries[1].id);
 
+    // Promise.allSettled: Promise.all과 달리 하나가 reject돼도 전체를 reject시키지 않고, 각 결과를
+    // { status: "fulfilled" | "rejected", ... } 형태로 모아 돌려준다. 10명이 동시에 마지막 한 자리를 다투는
+    // 상황에서 "누가 성공하고 누가 실패했는지"를 전부 확인하고 싶으므로 all 대신 allSettled를 쓴다.
     const attempts = await Promise.allSettled(
       candidates.map((candidate) => repo.joinTournament(tournament.id, candidate.id))
     );
@@ -301,6 +312,9 @@ describe("memory repository", () => {
   });
 });
 
+// 실제 티켓 발급 흐름을 흉내 낸다: 서버가 원문 티켓(암호학적으로 안전한 난수, base64url로 인코딩)을 클라이언트에
+// 주고, DB에는 그 SHA-256 해시만 저장한다 — index.ts의 assertWsTicketHash가 기대하는 "64자 16진수 해시" 형태를
+// 여기서 만들어 테스트에 쓴다.
 function newTicketHash(): string {
   const rawTicket = randomBytes(32).toString("base64url");
   return createHash("sha256").update(rawTicket, "utf8").digest("hex");

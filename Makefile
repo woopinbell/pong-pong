@@ -59,6 +59,9 @@ contracts:
 verify-build:
 	$(PNPM) verify:build
 
+# [INTV:ARCH] CI의 verify job이 바로 이 타겟 하나를 호출한다(.github/workflows/ci.yml) — 저렴하고
+# 빠른 검사부터(typecheck) 점점 비싼 검사로(build) 순서를 배치해, 초반에 이미 실패할 게 뻔한
+# 커밋이 뒤쪽의 프로덕션 빌드까지 가지 않고 빨리 끝나게 한다.
 check:
 	$(MAKE) typecheck
 	$(MAKE) unit-functional
@@ -69,6 +72,9 @@ check:
 postgres-integration:
 	$(PNPM) postgres-integration
 
+# [INTV:ARCH] HTTP 스모크와 WebSocket 스모크를 하나의 make 타겟으로 묶어 순서를 고정해둔 이유 —
+# WS 연결은 보통 HTTP 업그레이드 핸드셰이크를 거치므로, HTTP 서버가 먼저 정상 응답한다는 걸 확인한
+# 뒤에 WS를 검사하는 편이 "둘 다 실패했을 때 어느 쪽이 진짜 원인인지" 구분하기 쉽다.
 smoke:
 	$(MAKE) smoke-http
 	$(MAKE) smoke-ws

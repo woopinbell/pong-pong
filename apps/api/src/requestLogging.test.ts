@@ -48,6 +48,8 @@ describe("request log redaction", () => {
       "*.ticket",
       "*.query"
     ]));
+    // not.toEqual(expect.arrayContaining([...])): "이 값들을 포함하지 않는다"는 뜻 — requestId/userId처럼
+    // 로그 상관관계 추적에 필요한 필드는 절대 redact 대상이 아니어야 한다는 걸 못박아두는 회귀 테스트.
     expect(options.redact.paths).not.toEqual(expect.arrayContaining([
       "requestId",
       "userId",

@@ -8,6 +8,8 @@ import {
 import type { GameSnapshot } from "./game";
 
 describe("version 1 client events", () => {
+  // it.each([...])("설명 $필드", (케이스) => ...): 같은 테스트 로직을 여러 입력값에 대해 반복 실행하는 vitest API.
+  // 각 케이스는 { payload } 객체이고, 테스트 이름의 "$payload.type"은 실행 시 그 케이스의 payload.type 값으로 치환된다.
   it.each([
     { payload: { v: 1, type: "queue.join", mode: "ai" } },
     { payload: { v: 1, type: "queue.leave" } },
@@ -18,6 +20,8 @@ describe("version 1 client events", () => {
     { payload: { v: 1, type: "game.input", roomId: "room-1", inputSeq: 7, direction: -1 } },
     { payload: { v: 1, type: "chat.send", scope: "match", roomId: "11111111-1111-4111-8111-111111111111", body: "hello" } }
   ])("accepts $payload.type", ({ payload }) => {
+    // parseClientEvent는 문자열을 받으므로, 테스트에서 만든 객체는 JSON.stringify로 다시 직렬화해서 넘긴다
+    // (실제 소켓에서 오는 것도 텍스트 프레임이므로 왕복 과정을 그대로 재현).
     expect(parseClientEvent(JSON.stringify(payload))).toEqual(payload);
   });
 
@@ -27,6 +31,8 @@ describe("version 1 client events", () => {
       type: "queue.join",
       mode: "queue"
     });
+    // mode에는 기본값이 있지만 v(프로토콜 버전)에는 기본값이 없다 — 버전 필드를 생략한 메시지는
+    // "구버전 클라이언트가 실수로 보낸 것"일 수 있으므로 묵인하지 않고 그대로 거부되어야 한다는 의도.
     expect(() => parseClientEvent(JSON.stringify({ type: "queue.join" }))).toThrow();
   });
 
@@ -58,6 +64,8 @@ describe("version 1 client events", () => {
     }))).toThrow();
   });
 
+  // 로비/매치 채팅의 discriminatedUnion("scope") 경계 케이스들: 로비는 roomId가 있어도/없어도(null이어도) 되지만,
+  // 매치는 roomId가 반드시 "있는" UUID여야 한다 — 아래 케이스들이 그 규칙의 경계를 하나씩 짚는다.
   it.each([
     {
       name: "lobby event with a null room",
@@ -157,6 +165,9 @@ describe("version 1 server events", () => {
     },
     { v: 1, type: "presence.changed", online: 12, playing: 4 },
     { v: 1, type: "error", code: "invalid_event", message: "invalid event" }
+    // satisfies ServerEvent[]: 이 배열 리터럴을 ServerEvent[] 타입으로 "덮어씌우지" 않고, 각 원소가 그 타입을
+    // 만족하는지만 검사한다. `: ServerEvent[]`로 선언했다면 각 원소가 ServerEvent 타입으로 넓혀져서(예: type이
+    // "queue.matched"라는 리터럴 대신 string으로) 아래 it.each에서 정확한 리터럴 타입 추론을 잃었을 것.
   ] satisfies ServerEvent[];
 
   it.each(events)("validates and serializes $type", (event) => {
@@ -172,6 +183,8 @@ describe("version 1 server events", () => {
       type: "game.snapshot",
       snapshot: { ...snapshot, sequence: -1 }
     }))).toThrow();
+    // persisted: true인데 matchId가 null인 조합 — game.ts의 discriminatedUnion이 막으려 했던 바로 그 모순 상태.
+    // 스키마가 이걸 실제로 거부하는지 확인하는 회귀 테스트.
     expect(() => parseServerEvent(JSON.stringify({
       v: 1,
       type: "game.finished",

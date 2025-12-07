@@ -108,6 +108,9 @@ describe("session expiration", () => {
     expect(client.getQueryData(queryKeys.tournaments())).toEqual([{ id: "tournament-1" }]);
   });
 
+  // QueryObserver: React 컴포넌트(useQuery) 없이도 쿼리 하나의 상태 변화를 직접 구독할 수 있는 저수준 API —
+  // 여기서는 "쿼리가 한창 fetching 중인 상태에서 expireSession이 불리는" 순간을 재현하기 위해 쓴다
+  // (query.ts에서 설명한 "fetching 중이면 정리를 다음 틱으로 미룬다" 분기를 검증하는 테스트).
   it("lets an active unauthorized query settle instead of leaving it pending", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } }

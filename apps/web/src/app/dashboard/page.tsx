@@ -41,6 +41,9 @@ export default function DashboardPage() {
           <h2 className="text-lg font-black text-ink">점수 흐름</h2>
           <div className="mt-5 h-64 rounded-lg border border-line bg-gradient-to-b from-blue-50 to-white p-5">
             {hasRatingHistory ? (
+              // [INTV:ARCH] viewBox="0 0 640 220": SVG 내부 좌표계를 640x220으로 고정해두고, 실제
+              // 화면에 그려지는 크기(className의 h-full w-full)에 맞춰 그 좌표계를 비율대로 늘리거나
+              // 줄인다 — 그래서 아래 polyline의 좌표는 항상 이 640x220 기준으로만 계산하면 된다.
               <svg viewBox="0 0 640 220" className="h-full w-full" role="img" aria-label="점수 상승 그래프">
                 <polyline points={chartPoints} fill="none" stroke="#1768f2" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
                 <line x1="0" y1="180" x2="640" y2="180" stroke="#d8e1ef" />
@@ -74,6 +77,12 @@ export default function DashboardPage() {
   );
 }
 
+// [INTV:ARCH] 서버는 "각 경기에서 점수가 얼마나 변했는지(ratingDelta)"와 "지금 최종 점수"만 갖고
+// 있고, 과거 시점의 점수 자체는 따로 저장하지 않는다(rating_history 테이블이 DB에 있지만 이 화면은
+// 그걸 조회하지 않고 즉석에서 역산한다). 그래서 최신 경기부터 역순으로 각 델타를 거꾸로 빼나가면
+// (reduce로 전체 델타 합을 구해 현재 점수에서 빼면 "맨 처음" 점수가 나오고), 다시 시간 순서대로
+// 하나씩 더해가며 그 사이 시점들의 점수를 역산해낸다 — 별도 이력 테이블 조회 없이도 클라이언트에서
+// 점수 추이 그래프를 그릴 수 있는 방법.
 function buildRatingPoints(currentRating: number, recentMatches: MatchSummary[]): number[] {
   const reversed = [...recentMatches].reverse();
   let rating = currentRating - reversed.reduce((sum, match) => sum + match.ratingDelta, 0);
@@ -85,6 +94,11 @@ function buildRatingPoints(currentRating: number, recentMatches: MatchSummary[])
   return points;
 }
 
+// [INTV:ARCH] 점수 값들을 SVG <polyline points="x1,y1 x2,y2 ..."> 문자열로 바꾼다. x는 점 순서를
+// 0~640에 고르게 펼치고, y는 min~max 범위를 0~150 높이에 맞춰 정규화한다 — SVG의 y좌표는 아래로
+// 갈수록 커지므로(화면 좌표계와 같은 방향), 190에서 빼는 식으로 "값이 클수록 위로" 가도록 뒤집는다
+// (이 반전을 빼먹으면 그래프가 상하로 뒤집혀 보인다 — 데이터 값과 시각적 방향이 반대인 좌표계를
+// 다룰 때 흔히 놓치는 지점).
 function toChartPoints(points: number[]): string {
   const min = Math.min(...points);
   const max = Math.max(...points);

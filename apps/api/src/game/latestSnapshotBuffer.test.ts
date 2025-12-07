@@ -103,6 +103,9 @@ type FakeSnapshotSocket = SnapshotSocket & {
   terminate: ReturnType<typeof vi.fn>;
 };
 
+// 진짜 소켓 대신, send()가 호출될 때마다 콜백을 completions 큐에 쌓아두기만 하고 즉시 실행하지 않는 가짜
+// 구현이다 — 테스트가 completeSend()를 직접 호출하기 전까지는 "아직 네트워크로 실제 전송이 끝나지 않은" 상태를
+// 원하는 타이밍에 재현할 수 있다(위 ws-ticket.test.ts의 deferred와 같은 목적, 다른 형태).
 function fakeSocket(): FakeSnapshotSocket {
   const completions: Array<(error?: Error) => void> = [];
   return {

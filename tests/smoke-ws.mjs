@@ -1,3 +1,5 @@
+// smoke-api.mjs와 같은 성격의 절차형 스모크 스크립트 — 다만 이쪽은 실제 WS 프로토콜(매칭, 준비, 물리
+// 가속, 일시정지/재개, 채팅, AI 매칭)을 실제 소켓으로 끝까지 밟아가며 "실시간 경로 전체가 살아있는지"를 확인한다.
 const baseUrl = process.env.API_BASE_URL ?? "http://localhost:4000";
 const wsUrl = process.env.WS_URL ?? "ws://localhost:4000/ws";
 
@@ -138,6 +140,8 @@ function opened(socket) {
   });
 }
 
+// vitest의 expect.poll과 같은 발상을 프레임워크 없이 직접 구현한 폴링 헬퍼 — predicate가 참 같은 값을
+// 돌려줄 때까지(비동기 이벤트 수신을 기다리며) 짧은 간격으로 계속 재확인하고, 제한 시간을 넘기면 포기한다.
 async function waitFor(predicate, timeout = 10_000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt <= timeout) {

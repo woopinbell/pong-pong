@@ -98,6 +98,8 @@ describe("database row mappers", () => {
       is_npc: userRow.is_npc
     };
 
+    // toMatchObject: toEqual과 달리 "지정한 필드만" 일치하면 통과한다 — 나머지 필드까지 전부 적어야 하는
+    // toEqual과 달리, 이 테스트에서 관심 있는 필드(승패 판정 결과 등)만 부분적으로 검증할 때 쓴다.
     expect(toMatchSummary(match, USER_ID)).toMatchObject({
       id: MATCH_ID,
       opponentHandle: "winner",

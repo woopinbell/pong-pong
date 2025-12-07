@@ -6,11 +6,18 @@ import { createPostgresRepository, type AppRepository } from "./index";
 import { migrateDatabase } from "./migrator";
 import { resetTestDatabase } from "./testReset";
 
+// @testcontainers/postgresql: 실제 Postgres를 Docker 컨테이너로 띄워서 그 위에 대고 테스트하는 라이브러리 —
+// 여태까지의 단위 테스트들과 달리 이 파일은 진짜 SQL 제약조건(check, unique 등)과 트랜잭션 동작까지 검증한다.
+// 컨테이너 하나를 이 파일 전체(describe 블록)에서 재사용하고(beforeAll/afterAll), 테스트마다는 그 안에 스키마
+// 하나씩만 새로 만들었다 지우는 식으로 격리한다 — 테스트마다 컨테이너를 새로 띄우면 훨씬 느리기 때문.
 const POSTGRES_IMAGE = "postgres:16-alpine";
 const TEST_DATABASE = "pong_pong_test";
 const TEST_USERNAME = "pong";
 const TEST_PASSWORD = "pong";
 
+// Awaited<ReturnType<T["start"]>>: ReturnType으로 start 메서드의 반환 타입(Promise<X>)을 뽑고, Awaited로
+// 그 Promise가 resolve됐을 때의 타입(X)까지 벗겨낸다 — 라이브러리가 그 타입을 따로 export하지 않아도
+// "start()가 실제로 반환하는 객체의 타입"을 직접 얻어내는 TS 관용구.
 type StartedPostgres = Awaited<ReturnType<PostgreSqlContainer["start"]>>;
 
 interface IsolatedDatabaseContext {
@@ -23,6 +30,8 @@ interface IsolatedDatabaseContext {
 let container: StartedPostgres | undefined;
 let adminPool: Pool | undefined;
 
+// beforeAll/afterAll: vitest의 파일(또는 describe) 단위 라이프사이클 훅 — 각 it 앞뒤가 아니라 전체 스위트를
+// 시작/종료할 때 딱 한 번만 실행된다. Docker 컨테이너를 매 테스트마다 띄우는 대신 여기서 한 번만 띄워 공유한다.
 beforeAll(async () => {
   container = await startPostgresContainer();
   adminPool = new Pool({
@@ -63,6 +72,9 @@ describe("PostgreSQL integration", () => {
   it("migrates an empty schema and leaves a repeated migration unchanged", async () => {
     await withIsolatedDatabase(async ({ databaseUrl, openPool, schema }) => {
       const pool = openPool();
+      // to_regclass('users'): 그 이름의 테이블(정확히는 relation)이 현재 search_path 안에 존재하면 그 객체
+      // 식별자를, 없으면 null을 돌려주는 Postgres 함수 — "테이블이 있는지"를 에러 없이 조용히 확인할 때 쓴다.
+      // ::text는 그 결과를 문자열로 캐스팅하는 Postgres 연산자.
       const before = await pool.query<{ users: string | null }>(
         "select to_regclass('users')::text as users"
       );
@@ -71,6 +83,8 @@ describe("PostgreSQL integration", () => {
       await migrateDatabase(databaseUrl);
 
       const firstTables = await tableNames(pool, schema);
+      // expect.arrayContaining([...]): 실제 배열이 "이 원소들을 포함하기만" 하면 통과 — 순서나 그 외 원소가
+      // 더 있는지는 신경 쓰지 않는다. objectContaining의 배열 버전.
       expect(firstTables).toEqual(expect.arrayContaining([
         "admin_actions",
         "chat_messages",
@@ -137,6 +151,8 @@ describe("PostgreSQL integration", () => {
       ]);
       await expect(pool.query(
         "insert into chat_messages (scope, room_id, sender_id, body) values ('lobby', $1, $2, 'invalid')",
+        // code: "23514"는 Postgres의 표준 에러 코드 중 check_violation(체크 제약 위반)을 뜻한다 — 이 마이그레이션이
+        // 추가한 CHECK 제약이 실제로 잘못된 조합의 insert를 거부하는지 코드로 확인하는 것.
         [validRoomId, sender.id]
       )).rejects.toMatchObject({ code: "23514" });
       await expect(pool.query(
@@ -297,6 +313,9 @@ describe("PostgreSQL integration", () => {
         check (reason <> 'force audit failure')
       `);
 
+      // pg가 던지는 에러 객체는 code 외에도 constraint(위반한 제약의 이름)를 담고 있다 — 여기서는 일부러
+      // admin_actions insert만 실패하게 만드는 제약을 걸어두고, setUserBan 트랜잭션 전체가 롤백되는지(유저 상태는
+      // 그대로, admin_actions에도 아무것도 안 남는지) 검증한다.
       await expect(repository.setUserBan(
         actor.id,
         target.id,
@@ -399,6 +418,8 @@ describe("PostgreSQL integration", () => {
         result_key: command.resultKey
       }]);
 
+      // "id = any($1::uuid[])": Postgres에서 "IN (...)"과 비슷하게 배열의 어느 값과든 일치하면 참인 조건.
+      // JS 배열([winner.id, loser.id])을 파라미터로 넘기고 ::uuid[]로 그 파라미터를 uuid 배열 타입으로 캐스팅한다.
       const users = await pool.query<{
         handle: string;
         rating: number;
@@ -731,12 +752,15 @@ describe("PostgreSQL integration", () => {
     await expect(withIsolatedDatabase(async ({ openPool, schema }) => {
       failedSchema = schema;
       const pool = openPool();
+      // pg_backend_pid(): 이 커넥션을 서버 쪽에서 처리하는 프로세스의 id를 돌려주는 Postgres 함수.
       const backend = await pool.query<{ pid: number }>("select pg_backend_pid() as pid");
       backendPid = backend.rows[0]?.pid ?? 0;
       throw new Error("intentional integration failure");
     })).rejects.toThrow("intentional integration failure");
 
     expect(await schemaExists(failedSchema)).toBe(false);
+    // pg_stat_activity: 현재 서버에 연결된 세션들을 보여주는 Postgres 시스템 뷰. 클라이언트 쪽에서 pool.end()를
+    // 불렀다고 "믿는" 게 아니라, 서버 입장에서도 그 pid의 커넥션이 실제로 사라졌는지까지 확인하는 것.
     const activeConnection = await requireAdminPool().query<{ active: boolean }>(
       "select exists(select 1 from pg_stat_activity where pid = $1) as active",
       [backendPid]
@@ -744,11 +768,15 @@ describe("PostgreSQL integration", () => {
     expect(activeConnection.rows[0]?.active).toBe(false);
   });
 
+  // 이 테스트만은 beforeAll에서 공유하는 컨테이너를 안 쓰고 독립된 컨테이너를 새로 띄운다 — "컨테이너가 멈췄을 때
+  // 실제로 접속이 끊기는지"를 확인해야 하는데, 공유 컨테이너를 멈추면 이 파일의 다른 모든 테스트가 깨지기 때문.
   it("stops a temporary container when its callback fails", async () => {
     let stoppedConnectionUri = "";
 
     await expect(withTemporaryPostgres(async (temporaryContainer) => {
       stoppedConnectionUri = temporaryContainer.getConnectionUri();
+      // 컨테이너 안의 Postgres는 내부적으로 5432 포트를 쓰지만, Docker가 호스트의 임의 포트로 그걸 포워딩한다 —
+      // getPort()가 그 "호스트에서 실제로 열린" 포트 번호를 알려준다.
       const mappedPort = Number(new URL(stoppedConnectionUri).port);
       expect(mappedPort).toBe(temporaryContainer.getPort());
       expect(mappedPort).toBeGreaterThan(0);
@@ -798,6 +826,10 @@ async function withTemporaryPostgres<T>(
   }
 }
 
+// 이 파일의 거의 모든 테스트가 이 헬퍼로 시작한다: 공유 컨테이너 위에 테스트 하나만을 위한 스키마를 새로 만들고
+// (testReset.ts와 같은 test_<32자리 해시> 이름 규칙), 그 스키마로 격리된 databaseUrl을 만들어 콜백에 넘긴다.
+// 콜백이 openPool()/openRepository()로 만든 커넥션은 cleanupTasks에 등록해뒀다가, 성공하든 실패하든 finally에서
+// 역순으로(LIFO) 전부 정리한 뒤 스키마 자체를 drop한다 — 테스트가 실패해도 다음 테스트에 상태가 새지 않는다.
 async function withIsolatedDatabase<T>(
   callback: (context: IsolatedDatabaseContext) => Promise<T>,
   options: { migrate?: boolean } = {}
@@ -853,6 +885,9 @@ async function withIsolatedDatabase<T>(
     } catch (error) {
       cleanupErrors.push(error);
     }
+    // 콜백 자체가 실패했다면(callbackError가 있으면) 그 에러가 우선이고, 정리 과정에서 생긴 추가 에러는
+    // 삼켜서 원래 실패 원인을 가린다. 콜백은 성공했는데 정리만 실패했다면, AggregateError(여러 에러를 하나로
+    // 묶는 표준 내장 클래스)로 정리 단계에서 난 에러들을 하나도 잃지 않고 모아서 던진다.
     if (callbackError === undefined && cleanupErrors.length > 0) {
       throw new AggregateError(cleanupErrors, "Failed to clean up isolated PostgreSQL test resources");
     }

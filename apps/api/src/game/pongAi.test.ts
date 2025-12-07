@@ -13,6 +13,9 @@ describe("SeededIntegerPrng", () => {
     );
   });
 
+  // 동작을 호출해서 검증하는 게 아니라, pongAi.ts 소스 코드 텍스트 자체를 읽어 특정 문자열이 없는지 확인하는
+  // "정적 분석" 방식의 테스트다 — 나중에 누군가 무심코 Math.random()이나 Math.sin() 기반의 다른 난수 생성
+  // 방식을 섞어 넣으면(그러면 seed가 같아도 재현이 안 될 수 있다), 이 테스트가 그 즉시 잡아낸다.
   it("does not rely on floating point pseudo-random helpers", async () => {
     const source = await readFile(new URL("./pongAi.ts", import.meta.url), "utf8");
     expect(source).not.toContain("Math.random");

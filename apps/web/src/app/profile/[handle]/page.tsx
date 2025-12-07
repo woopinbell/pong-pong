@@ -12,6 +12,12 @@ import {
   profileQueryOptions
 } from "@/lib/query";
 
+// [INTV:TRAP] 폴더 이름의 [handle]은 Next.js App Router의 "동적 라우트 세그먼트" 문법 — 예를 들어
+// /profile/pong-master로 접속하면 handle이 "pong-master"로 채워진 params가 이 컴포넌트에 전달된다.
+// Next 최신 버전에서는 이 params가 (동기 값이 아니라) Promise로 오므로, React의 use() 훅으로 그
+// 값을 꺼낸다 — use()는 useEffect 없이도 렌더링 도중 Promise나 Context 값을 직접 읽을 수 있게
+// 해주는 훅이다. params를 예전 버전처럼 동기 객체로 가정하고 곧바로 params.handle로 접근하면,
+// 실제로는 Promise 객체의 handle 프로퍼티(undefined)를 읽게 되는 버전 차이 함정.
 export default function ProfilePage({ params }: { params: Promise<{ handle: string }> }) {
   const { handle } = use(params);
   const queryClient = useQueryClient();
@@ -36,6 +42,10 @@ export default function ProfilePage({ params }: { params: Promise<{ handle: stri
   async function shareProfile() {
     try {
       const url = `${window.location.origin}/profile/${handle}`;
+      // [INTV:EDGE] navigator.clipboard.writeText: 브라우저의 클립보드 API — 비동기이고, 브라우저
+      // 정책상 HTTPS(보안 컨텍스트)나 권한이 없으면 실패할 수 있어 항상 실패 가능성을 염두에 두고
+      // try/catch로 감싼다(로컬 HTTP 개발 환경에서는 이 API 자체가 없을 수 있어, try/catch 없이
+      // 호출하면 개발 중에만 재현되는 크래시가 생긴다).
       await navigator.clipboard.writeText(url);
       setNotice("프로필 공유 링크를 복사했습니다.");
     } catch {

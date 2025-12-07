@@ -98,6 +98,9 @@ describe("GameHub matchmaking boundary", () => {
     await pair(recoveredLeft, recoveredRight);
   });
 
+  // 방 생성 도중 예외가 나면(여기선 일부러 observer 콜백을 실패시켜 흉내 냄) gameHub.ts의 createRoom
+  // catch 블록이 matchmaker.release()로 양쪽의 "matched" 예약을 풀어준다 — 그래야 실패한 첫 시도 이후
+  // 다시 큐에 참가했을 때 서로 매칭될 수 있다(release 없이 matched 상태만 남으면 영원히 재매칭이 막힌다).
   it("rolls back the room and reservations when room creation fails", async () => {
     const repository = createMemoryRepository();
     repositories.push(repository);

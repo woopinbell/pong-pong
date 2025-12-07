@@ -71,6 +71,9 @@ describe("apiFetch", () => {
 
   beforeEach(() => {
     fetchMock = vi.fn();
+    // vi.stubGlobal("fetch", ...): 전역 객체(브라우저의 window.fetch)를 통째로 모의 함수로 바꿔치기한다 —
+    // 특정 객체의 메서드를 감시하는 vi.spyOn과 달리, fetch처럼 "전역으로 존재하는 것"을 가로챌 때 쓴다.
+    // afterEach의 unstubAllGlobals()로 반드시 원상복구해야 다른 테스트에 영향이 새지 않는다.
     vi.stubGlobal("fetch", fetchMock);
   });
 
@@ -175,6 +178,9 @@ describe("apiFetch", () => {
     expect(dispatchEvent.mock.calls[0][0]).toMatchObject({ type: SESSION_EXPIRED_EVENT });
   });
 
+  // AbortController/AbortSignal은 표준 Fetch API의 취소 메커니즘 — signal에 "abort" 이벤트가 발생하면
+  // 요청을 중단해야 한다는 신호다. 여기서는 실제 fetch 대신, 그 신호가 오면 AbortError로 reject하는 가짜
+  // 구현을 넣어서 "요청이 실제로 취소되는지"를 네트워크 없이 재현한다.
   it("passes AbortSignal through to fetch and preserves cancellation", async () => {
     const controller = new AbortController();
     fetchMock.mockImplementation((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
@@ -335,6 +341,8 @@ describe("API endpoint helpers", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).signal).toBe(controller.signal);
   });
 
+  // http-contract.test.ts가 API 서버 쪽에서 "모든 라우트가 계약을 강제하는지"를 표로 훑었던 것처럼, 여기서는
+  // 프론트엔드의 모든 API 헬퍼 함수가 "서버 응답이 공유 스키마와 안 맞으면 예외를 던지는지"를 한꺼번에 검증한다.
   it.each([
     { name: "devLogin", call: () => devLogin("tester", "테스터") },
     { name: "guestLogin", call: () => guestLogin() },

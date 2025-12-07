@@ -29,6 +29,9 @@ describe("GameHub finalization recovery", () => {
       matchFinalized: (event) => finalizedEvents.push({ outcome: event.outcome, created: event.created })
     });
     hubs.push(hub);
+    // mockRejectedValueOnce(...).mockResolvedValueOnce(...): 호출될 때마다 다른 결과를 순서대로 내놓도록
+    // 예약해둔다 — 첫 호출은 실패, 두 번째 호출부터는 성공. gameHub.ts의 재시도 로직(waitForFinalizationRetry)이
+    // 첫 실패 후 정말로 다시 시도해서 결국 성공하는지를 재현하기 위한 설정.
     const finalizeMatch = vi.spyOn(repository, "finalizeMatch")
       .mockRejectedValueOnce(new Error("database temporarily unavailable"))
       .mockResolvedValueOnce({
@@ -76,6 +79,8 @@ describe("GameHub finalization recovery", () => {
     socket.receive({ v: 1, type: "game.ready", roomId });
     const drain = hub.beginDrain(60_000);
 
+    // vi.mocked(fn): 이미 vi.spyOn 등으로 모의 처리된 함수를 다시 받아올 때, 그 반환 타입을 "모의 함수
+    // (mock.calls 등의 속성을 가진)"로 좁혀준다 — 타입 단언 없이 .mock.calls에 접근하기 위한 헬퍼.
     const finalizeMatch = vi.mocked(repository.finalizeMatch);
     await advanceUntil(() => finalizeMatch.mock.calls.length === 1);
     let settled = false;
@@ -145,6 +150,9 @@ async function flushEvents(): Promise<void> {
   await Promise.resolve();
 }
 
+// expect.poll과 달리, 여기서는 가짜 타이머를 "직접 조금씩 전진시키면서" 조건을 확인해야 한다 — 재시도 사이의
+// setTimeout 지연 자체가 가짜 타이머로 제어되므로, 시간을 흘려보내는 주체가 테스트 코드 자신이어야 하기 때문
+// (expect.poll은 그냥 재확인만 반복할 뿐 시간을 흐르게 하지는 않는다).
 async function advanceUntil(predicate: () => boolean): Promise<void> {
   for (let elapsed = 0; elapsed < 30_000 && !predicate(); elapsed += 10) {
     await vi.advanceTimersByTimeAsync(10);

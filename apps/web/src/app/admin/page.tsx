@@ -54,6 +54,8 @@ export default function AdminPage() {
         </div>
       </div>
       <section className="card mt-5 p-5">
+        {/* htmlFor: JSX에서는 예약어인 for 대신 htmlFor를 쓴다 — 같은 id를 가진 input과 이 label을 연결해서,
+            label을 클릭해도 input에 포커스가 가고 스크린 리더도 그 관계를 인식하게 한다. */}
         <label className="text-sm font-black text-ink" htmlFor="admin-reason">조치 사유</label>
         <input
           id="admin-reason"

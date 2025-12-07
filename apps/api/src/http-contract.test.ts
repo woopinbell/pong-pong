@@ -72,6 +72,10 @@ const jsonBodyRoutes: JsonRouteCase[] = [
   }
 ];
 
+// jsonRoutes/jsonBodyRoutes는 http.ts의 jsonHttpRequestContracts에 등록된 (거의) 모든 라우트를 나열한
+// 데이터 테이블이다 — 새 라우트를 추가했는데 parseHttpRequest(즉 .strict() 스키마 검증)를 빼먹는 실수를
+// 막기 위해, "모든 라우트가 예상 밖의 쿼리/바디 필드를 공통된 에러 형식으로 거부하는지"를 라우트 하나하나
+// 손으로 적지 않고 이 표를 순회하며 한꺼번에 검증한다.
 describe("JSON HTTP request contracts", () => {
   let repo: AppRepository;
   let app: ReturnType<typeof buildApp>;

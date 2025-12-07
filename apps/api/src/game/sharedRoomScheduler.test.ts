@@ -15,6 +15,8 @@ describe("SharedRoomScheduler", () => {
     scheduler.register("room-2", secondStep);
 
     expect(scheduler.activeRooms).toBe(2);
+    // vi.getTimerCount(): 가짜 타이머 환경에서 현재 대기 중인 타이머 개수를 알려준다 — 방이 두 개 등록됐어도
+    // 타이머는 SharedRoomScheduler가 공유하는 단 하나뿐이라는 걸 직접 확인한다.
     expect(vi.getTimerCount()).toBe(1);
 
     nowMs = 50;
@@ -44,6 +46,7 @@ describe("SharedRoomScheduler", () => {
     nowMs = 50;
     vi.advanceTimersByTime(50);
 
+    // toHaveBeenCalledOnce(): toHaveBeenCalledTimes(1)의 축약형.
     expect(secondStep).toHaveBeenCalledOnce();
     expect(scheduler.activeRooms).toBe(1);
     scheduler.stop();

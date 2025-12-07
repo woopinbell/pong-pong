@@ -9,6 +9,8 @@ const FIXED_DELTA_MS = 50;
 describe("PongSimulation", () => {
   it("returns a deterministic next state without mutating its input", () => {
     const initial = PongSimulation.initialState();
+    // structuredClone: 객체를 참조 없이 완전히 깊은 복사하는 표준 내장 함수 — step()이 initial을 실수로라도
+    // 변형하지 않는지 나중에(before와) 비교해서 확인하기 위한 "원본 스냅샷"을 만든다.
     const before = structuredClone(initial);
     const inputs = { left: -1, right: 1 } as const;
 
@@ -27,6 +29,8 @@ describe("PongSimulation", () => {
     const halfStep = PongSimulation.step(initial, { left: 1, right: 0 }, 25);
     const fullStep = PongSimulation.step(initial, { left: 1, right: 0 }, 50);
 
+    // toBeCloseTo: 부동소수점 연산 결과를 비교할 때 정확히 같은 값이 아니라 오차 범위 안에서만 같으면 통과시키는
+    // matcher(===로 비교하면 반올림 오차 때문에 실패할 수 있다).
     expect(fullStep.paddles.left.y - initial.paddles.left.y).toBeCloseTo(
       (halfStep.paddles.left.y - initial.paddles.left.y) * 2
     );
@@ -61,6 +65,9 @@ describe("PongSimulation", () => {
     expect(() => PongSimulation.step(state, { left: 0, right: 0 }, Number.NaN)).toThrow(RangeError);
   });
 
+  // 1000틱 전체 시뮬레이션 결과를 일일이 비교하는 대신, 최종 상태를 JSON으로 직렬화해 SHA-256 해시 하나로
+  // 압축해서 비교한다 — 같은 시드로 두 번 돌린 결과가 "완전히 동일한 해시"로 나오는지만 보면, 물리 계산 중
+  // 어딘가에서 미묘하게 결정론이 깨지는 버그(부동소수점 순서 의존, Math.random 오염 등)를 한 번에 잡아낼 수 있다.
   it("replays one thousand ticks to the same final hash", () => {
     const first = replayHash("replay-seed-2026");
     const second = replayHash("replay-seed-2026");

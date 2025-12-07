@@ -10,6 +10,10 @@ import {
 } from "./guestAccess.js";
 
 describe("GuestAccess", () => {
+  // vi.useFakeTimers()/vi.setSystemTime()/vi.advanceTimersByTimeAsync(): vitest가 Date.now()와
+  // setTimeout 등을 가짜로 바꿔치기해서, 실제로 30초/1분을 기다리지 않고도 "그만큼 시간이 지난 것"처럼 테스트를
+  // 빠르게 진행시킬 수 있게 해준다. 이 파일 안에서 쓰고 나면 afterEach에서 반드시 useRealTimers()로 되돌려
+  // 다른 테스트에 가짜 시계가 새어나가지 않게 한다.
   afterEach(() => vi.useRealTimers());
 
   it("authenticates an HMAC-signed session for two hours and rejects tampering", () => {
@@ -42,6 +46,9 @@ describe("GuestAccess", () => {
     for (let count = 0; count < DEFAULT_GUEST_CREATION_LIMIT_PER_MINUTE; count += 1) {
       expect(access.createSession("203.0.113.20").user.sessionKind).toBe("guest");
     }
+    // expect.objectContaining<Partial<T>>({...}): objectContaining에 제네릭 타입 인자를 줘서, "이 필드들은
+    // GuestAccessError의 일부여야 한다"는 걸 타입 체크가 강제하게 한다(예: code에 오타를 내면 컴파일 에러).
+    // toThrowError는 toThrow의 다른 이름(alias) — 동작은 동일하다.
     expect(() => access.createSession("203.0.113.20")).toThrowError(
       expect.objectContaining<Partial<GuestAccessError>>({ code: "guest_creation_rate_limited" })
     );
@@ -199,6 +206,8 @@ describe("GuestAccess", () => {
   });
 });
 
+// ConstructorParameters<typeof GuestAccess>[0]: GuestAccess 생성자가 받는 첫 번째 인자(옵션 객체)의
+// 타입을 GuestAccessOptions를 따로 import하지 않고도 클래스 자체로부터 뽑아낸다.
 function createAccess(overrides: Partial<ConstructorParameters<typeof GuestAccess>[0]> = {}): GuestAccess {
   return new GuestAccess({
     secret: "guest-test-secret-that-is-long-enough",

@@ -1,3 +1,10 @@
+# [INTV:ARCH] 이 워크플로의 5개 job(verify, postgres-integration, process-and-browser,
+# guest-demo-browser, production-compose)은 서로 needs: 의존이 없어 전부 동시에 시작한다 —
+# "타입체크/유닛테스트", "DB 통합 테스트", "실제 프로세스를 띄운 브라우저 테스트", "게스트 데모
+# 모드 브라우저 테스트", "프로덕션 컨테이너 스택 기동"이 서로 겹치는 게 없는 독립적인 검증
+# 축이라, 순서를 강제할 이유가 없고 병렬로 돌려 전체 CI 대기 시간을 줄인다(다섯 job이 각자 최대
+# 15~30분이지만, 직렬이었다면 합쳐서 최대 100분 넘게 걸렸을 것). GitHub Actions 문법 자체에 대한
+# 개념 설명은 miniRT의 .github/workflows/ci.yml에 모아뒀다.
 name: CI
 
 on:
@@ -25,11 +32,22 @@ jobs:
         with:
           persist-credentials: false
 
+      # [INTV:TRAP] pnpm/action-setup을 actions/setup-node보다 먼저 실행해야 한다 — 바로 아래
+      # setup-node의 cache: pnpm 옵션이 내부적으로 "pnpm store 경로가 어디인지" 알아내려고 pnpm
+      # 커맨드를 직접 실행하는데, 이 시점에 pnpm 자체가 아직 설치되어 있지 않으면 캐시 설정
+      # 단계가 조용히 실패하거나 캐시가 아예 안 걸린다. 버전을 고정하는 이유도 일반적인 이유와
+      # 같다(러너에 기본 설치된 버전이 로컬 개발 환경과 달라 lockfile 포맷/동작이 어긋나는 것을
+      # 방지).
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.32.1
 
+      # [INTV:ARCH] node-version-file로 리포지토리에 커밋된 .node-version 파일을 그대로 참조 —
+      # CI가 쓰는 Node 버전과 로컬 개발자가 쓰는 버전을 다른 곳(워크플로 YAML과 로컬 설정 파일)에
+      # 두 번 적으면 언젠가 둘이 어긋난다. cache: pnpm + cache-dependency-path로 pnpm-lock.yaml의
+      # 해시를 캐시 키로 써서, lockfile이 그대로면 install 단계에서 매번 전체 패키지를 다시 받지
+      # 않고 캐시를 재사용한다.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -37,9 +55,17 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      # [INTV:TRAP] make install(내부적으로 pnpm install --frozen-lockfile)을 쓴다 — 옵션 없는
+      # `pnpm install`은 lockfile과 package.json이 어긋나 있으면 lockfile을 조용히 고쳐버릴 수
+      # 있는데, CI에서는 "지금 커밋된 lockfile 그대로"만 재현 가능한 설치가 되어야 하므로
+      # frozen-lockfile로 그 어긋남 자체를 에러로 만든다.
       - name: Install dependencies
         run: make install
 
+      # [INTV:ARCH] make check 하나가 typecheck -> unit-functional -> contracts -> build ->
+      # verify-build 5단계를 순서대로 실행한다(Makefile 참고) — 이 순서 자체가 "저렴하고 빠른
+      # 검사부터, 비싸고 느린 검사로" 배치된 fail-fast 전략: 타입 에러가 있는데 굳이 유닛 테스트나
+      # 프로덕션 빌드까지 갈 필요는 없다.
       - name: Run static and build checks
         run: make check
 
@@ -76,6 +102,13 @@ jobs:
     name: HTTP, WebSocket, and browser tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # [INTV:ARCH] services: 는 job과 같은 네트워크 네임스페이스에서 함께 시작되는 부가 컨테이너를
+    # 선언하는 키 — 여기서는 이 job의 run: 스텝들이 127.0.0.1:5432로 바로 접속할 수 있는 PostgreSQL
+    # 컨테이너를 하나 붙여준다(docker run으로 직접 띄우고 IP를 알아내는 수고를 대신해준다).
+    # health-cmd/interval/timeout/retries는 "포트가 열렸다"와 "DB가 접속을 받을 준비가 됐다"가
+    # 다르다는 걸 반영한 것 — pg_isready로 실제 준비 여부를 5초 간격, 최대 20번 재시도로 확인하고,
+    # GitHub Actions는 이 헬스체크가 통과할 때까지 자동으로 이후 스텝 시작을 미룬다(그래서 아래
+    # run: 스텝에 별도 대기 로직이 없다 — services의 헬스체크가 그 역할을 이미 하기 때문).
     services:
       postgres:
         image: postgres:16-alpine
@@ -127,6 +160,22 @@ jobs:
           pnpm --filter @pong-pong/db migrate
           pnpm --filter @pong-pong/db seed:dev
 
+      # [INTV:FLOW] CI 러너에는 이 두 서버를 대신 띄워줄 오케스트레이터가 없어, 이 셸 스크립트가
+      # 직접 "백그라운드로 띄우기 -> 준비될 때까지 폴링 -> 테스트 실행 -> (트랩으로) 정리"까지
+      # 전부 담당한다.
+      # - [FLOW] 1. API/WEB 프로세스를 & 로 백그라운드 실행하고 PID 저장 -> 2. trap cleanup EXIT로
+      #   "이 스텝이 어떻게 끝나든(성공/실패/타임아웃)" 반드시 두 프로세스를 정리하게 등록 ->
+      #   3. /health/ready, 루트 페이지를 각각 최대 60초 폴링 -> 4. 준비 확인 후 smoke, e2e 실행.
+      # [INTV:TRAP] `set -euo pipefail` 없이 이런 스크립트를 짜면, 예를 들어 API 프로세스가 시작
+      # 직후 죽어도 curl 폴링 루프가 60번 다 돌고 나서야(그리고 그마저도 마지막 줄의 curl이
+      # 실패해야) 이 스텝이 실패로 잡힌다 — set -e가 있어도 && / 파이프 안에서는 중간 실패가
+      # 가려질 수 있어(pipefail이 그 구멍을 막음), 이 셋을 함께 켜는 게 "백그라운드 프로세스 +
+      # 폴링" 패턴에서는 사실상 필수에 가깝다.
+      # [INTV:TRAP] trap cleanup EXIT를 폴링 루프보다 먼저 등록해야 한다 — 만약 폴링 도중
+      # 타임아웃돼서 스크립트가 죽거나, make smoke/e2e가 실패해서 조기 종료되는 경우에도 trap이
+      # 걸려 있어야 API_PID/WEB_PID 프로세스가 좀비로 남지 않고 정리된다. cleanup 안의
+      # `|| true`는 "이미 죽어있는 프로세스를 kill/wait 하려다 나는 에러"로 정리 스텝 자체가
+      # 실패 처리되는 것을 막기 위함(정리 실패가 원래 테스트 실패를 가리면 안 된다는 원칙).
       - name: Run process smoke and browser tests
         env:
           APP_MODE: development
@@ -163,6 +212,10 @@ jobs:
           make smoke
           make e2e
 
+      # [INTV:EDGE] 실패했을 때만(if: failure()) API/WEB 프로세스의 표준출력+표준에러를 리다이렉트해둔
+      # 로그 파일을 업로드한다 — 이 로그는 콘솔의 GitHub Actions 로그와는 별개로(두 프로세스를
+      # 백그라운드로 띄웠기 때문에 그 출력이 Actions 콘솔에는 안 보인다), "서버가 왜 안 떴는지"를
+      # 사후에 확인할 유일한 단서다.
       - name: Upload process logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -174,6 +227,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # [INTV:ARCH] process-and-browser와 거의 같은 "프로세스 백그라운드 실행 -> 폴링 -> 테스트" 골격을
+  # 반복하지만, DB 통합 없이 게스트(비회원 데모) 모드(APP_MODE=demo)만 별도 job으로 분리해뒀다 —
+  # 두 모드를 한 job에서 이어서 검증하면 앞 모드의 프로세스/포트 정리가 제대로 안 됐을 때 뒤
+  # 모드가 오염된 상태에서 시작할 위험이 있는데, 별도 job(=별도 러너)으로 분리하면 그 위험 자체가
+  # 구조적으로 사라진다.
   guest-demo-browser:
     name: Guest demo browser tests
     runs-on: ubuntu-latest
@@ -256,6 +314,10 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # [INTV:ARCH] 앞의 job들이 소스에서 직접 프로세스를 띄워 검증했다면, 이 job은 실제 배포와 가장
+  # 가까운 형태 — docker-compose.yml로 정의된 프로덕션 이미지 스택 전체를 빌드해서 띄워보는
+  # 마지막 관문이다. 개발 모드 프로세스에서는 통과했던 것이 Dockerfile의 빌드 단계나 프로덕션
+  # 전용 설정에서 깨지는 경우(예: 환경변수 누락, 포트 매핑 오류)를 이 job만 잡아낼 수 있다.
   production-compose:
     name: Production Compose stack
     runs-on: ubuntu-latest
@@ -270,17 +332,33 @@ jobs:
         with:
           persist-credentials: false
 
+      # [INTV:TRAP] --wait --wait-timeout 600을 안 쓰면 `docker compose up`은 컨테이너를
+      # "시작 요청"만 하고 바로 다음 스텝으로 넘어간다 — 그 시점에 컨테이너가 실제로 healthy
+      # 상태인지는 보장되지 않는다. --wait는 compose 파일에 정의된 healthcheck가 전부 통과할
+      # 때까지 이 명령 자체를 블로킹시켜, process-and-browser job에서 했던 "수동 curl 폴링
+      # 루프"를 compose 자체의 기능으로 대체한 것 — 스택이 여러 컨테이너로 구성될수록 수동
+      # 폴링보다 이쪽이 더 안정적이다(각 컨테이너가 정의한 자기 자신의 healthcheck를 그대로
+      # 신뢰하면 되므로).
       - name: Start the production stack
         run: docker compose up --build --wait --wait-timeout 600
 
       - name: Verify the public health endpoint
         run: curl --fail --silent http://localhost:8080/api/health/ready
 
+      # [INTV:EDGE] /api/metrics(Prometheus 메트릭 엔드포인트)가 외부에 노출된 8080 포트로는
+      # 아예 접근 불가능(404)해야 한다는 걸 확인하는, "있어야 할 게 있는지"가 아니라 "없어야 할
+      # 게 정말 없는지"를 검증하는 음성 테스트 — 운영 메트릭이 인증 없이 공개 포트로 새어나가는
+      # 설정 실수를, 사람이 매번 눈으로 nginx/proxy 설정을 확인하지 않고도 CI가 기계적으로
+      # 잡아낸다.
       - name: Verify metrics stay internal
         run: |
           status=$(curl --silent --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/metrics)
           test "$status" = "404"
 
+      # [INTV:EDGE] if: always() — 위 헬스체크/메트릭 검증이 실패해도, 이 job이 띄운 컨테이너와
+      # 볼륨은 반드시 정리돼야 한다(--volumes로 익명 볼륨까지, --remove-orphans로 compose
+      # 파일에서 이미 빠진 서비스의 잔여 컨테이너까지) — 그렇지 않으면 실패한 실행일수록 러너에
+      # 상태가 남아 다음 실행에 영향을 줄 수 있다.
       - name: Stop the production stack
         if: always()
         run: docker compose down --volumes --remove-orphans

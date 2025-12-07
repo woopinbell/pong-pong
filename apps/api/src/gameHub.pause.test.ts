@@ -104,6 +104,9 @@ function latestSnapshot(socket: FakeSocket) {
   return event.snapshot;
 }
 
+// GameHub.receive()는 여러 단계의 await를 거쳐 응답을 보낸다(파싱 → 필요하면 repo 호출 → send) — 마이크로태스크
+// 큐를 한 번만 비우면(gracefulShutdown.test.ts의 단일 Promise.resolve()) 그 체인 중간에서 멈출 수 있어,
+// 연속으로 몇 번 더 비워서 처리가 끝까지 진행될 시간을 확실히 확보한다.
 async function flushEvents(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();

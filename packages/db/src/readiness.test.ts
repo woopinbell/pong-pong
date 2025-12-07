@@ -6,6 +6,8 @@ describe("database readiness", () => {
   it("treats memory storage as ready without pretending migrations ran", async () => {
     const repository = createMemoryRepository();
 
+    // expect(promise).resolves.toEqual(...): 프로미스가 성공적으로 resolve될 때까지 기다린 뒤 그 값에 대해
+    // 단언한다 — `expect(await promise).toEqual(...)`를 줄인 형태로 볼 수 있다.
     await expect(repository.checkReadiness()).resolves.toEqual({
       database: "up",
       migrations: "not_applicable"
